@@ -43,7 +43,7 @@ class BulbConfig:
     mode: str = "vivid"
     brightness: float = 1.0
     min_brightness: float = 0.05
-    method: str = "auto"  # auto | music | colour
+    method: str = "colour"  # colour (reliable) | music (faster, not on every bulb) | auto
     min_interval: float = 0.15
 
     @classmethod
@@ -177,6 +177,11 @@ class BulbWorker(threading.Thread):
     def _loop(self) -> None:
         last_send = 0.0
         last_contact = time.monotonic()
+        with self._lock:
+            if self._in_sync_mode and self._target is None:
+                # A restore was interrupted by a connection error: retry it now.
+                self._restore_requested = True
+                self._wake.set()
         while not self._stopping.is_set():
             self._wake.wait(timeout=5)
             self._wake.clear()
@@ -192,7 +197,7 @@ class BulbWorker(threading.Thread):
                 continue
             if target is None:
                 if now - last_contact > 8:  # keep the persistent socket alive
-                    self._dev.heartbeat(nowait=True)
+                    self._dev.heartbeat(nowait=False)
                     last_contact = now
                 continue
             wait = self.cfg.min_interval - (now - last_send)
@@ -213,21 +218,28 @@ class BulbWorker(threading.Thread):
         if max(rgb) == 0:
             r = g = b = 1  # avoid switching off; nearly black
         if not self._in_sync_mode:
-            # Taking over: remember how HA left the bulb, to give it back later.
-            state = dev.state()
-            if "Error" not in state:
-                self._original = {k: state.get(k) for k in RESTORE_KEYS if state.get(k) is not None}
+            # Taking over: remember how HA / the Tuya app left the bulb, to give it
+            # back later. Ask the bulb now - tinytuya's cache may be outdated.
+            fresh = dev.status()
+            if fresh and "dps" in fresh and "Error" not in fresh:
+                state = dev.state()
+                if "Error" not in state:
+                    self._original = {
+                        k: state.get(k) for k in RESTORE_KEYS if state.get(k) is not None
+                    }
+            else:
+                _LOGGER.warning("%s: could not read state before takeover: %s", self.cfg.name, fresh)
         if self.use_music:
             if not self._in_sync_mode:
-                dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"}, nowait=True)
-            dev.set_music_colour(0, r, g, b, nowait=True)
+                dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"})
+            dev.set_music_colour(0, r, g, b)
         else:
             values = {dps["colour"]: tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])}
             if not self._in_sync_mode:
                 values[dps["switch"]] = True
                 if dps.get("mode"):
                     values[dps["mode"]] = "colour"
-            dev.set_multiple_values(values, nowait=True)
+            dev.set_multiple_values(values)
         self._in_sync_mode = True
         self.status = STATUS_SYNC
         self._sent = rgb

@@ -37,7 +37,7 @@ class Device:
     mode: str = "vivid"
     brightness: float = 1.0
     min_brightness: float = 0.05
-    method: str = "auto"
+    method: str = "colour"
     min_interval: float = 0.15
 
     @classmethod

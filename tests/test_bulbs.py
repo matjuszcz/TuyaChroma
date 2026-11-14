@@ -23,13 +23,16 @@ class FakeBulb:
         self.closed = False
 
     def status(self):
+        self._cached = dict(self.current)
         return {"dps": {"20": True, "21": "white", "22": 500, "23": 0, "24": "000003e803e8"}}
 
     current = {"switch": True, "mode": "white", "brightness": 500, "colourtemp": 0,
                "colour": "000003e803e8"}
+    _cached = None
 
     def state(self):
-        return dict(self.current)
+        # Like tinytuya with a persistent socket: the cache, refreshed by status()
+        return dict(self._cached if self._cached is not None else self.current)
 
     def set_multiple_values(self, values, nowait=False):
         self.sent.append(("multi", dict(values)))
@@ -63,7 +66,7 @@ def make_worker(music=True, **kw):
 
 
 def test_music_mode_and_restore() -> None:
-    worker, bulb = make_worker()
+    worker, bulb = make_worker(method="music")
     worker.set_color((255, 0, 0))
     assert wait_for(lambda: ("music", (255, 0, 0)) in bulb.sent)
     assert bulb.sent[0] == ("multi", {"20": True, "21": "music"})
@@ -89,7 +92,7 @@ def test_colour_mode_coalesces_updates() -> None:
 
 
 def test_stop_restores_state() -> None:
-    worker, bulb = make_worker()
+    worker, bulb = make_worker(method="music")
     worker.set_color((0, 0, 255))
     assert wait_for(lambda: ("music", (0, 0, 255)) in bulb.sent)
     worker.stop()
@@ -106,7 +109,7 @@ def test_bulb_color_zone() -> None:
 
 
 def test_restore_uses_state_from_just_before_takeover() -> None:
-    worker, bulb = make_worker()
+    worker, bulb = make_worker(method="music")
     assert worker.status == STATUS_READY
     # Meanwhile HA turned the lamp off; then a game starts.
     bulb.current = {"switch": False, "mode": "colour", "brightness": 10, "colourtemp": 0,
@@ -135,3 +138,36 @@ def test_non_rgb_bulb_is_not_retried() -> None:
     worker.join(2)
     assert not worker.is_alive()
     assert worker.status == STATUS_UNSUPPORTED and len(calls) == 1
+
+
+def test_default_is_colour_mode() -> None:
+    worker, bulb = make_worker()  # bulb claims music support, but default is colour
+    worker.set_color((255, 0, 0))
+    assert wait_for(lambda: any(k == "multi" and "24" in v for k, v in bulb.sent))
+    assert not any(k == "music" for k, _ in bulb.sent)
+    worker.stop()
+
+
+def test_restore_retried_after_connection_error() -> None:
+    bulb = FakeBulb()
+    fail = {"on": False}
+    real_multi = bulb.set_multiple_values
+
+    def flaky(values, nowait=False):
+        if fail["on"] and values.get("21") == "white":
+            fail["on"] = False
+            raise ConnectionError("bulb went away")
+        real_multi(values, nowait)
+
+    bulb.set_multiple_values = flaky
+    cfg = BulbConfig(name="lamp", id="x", ip="1.2.3.4", local_key="k", min_interval=0.05)
+    worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
+    worker.start()
+    assert wait_for(lambda: worker.connected)
+    worker.set_color((0, 0, 255))
+    assert wait_for(lambda: worker.status == STATUS_SYNC)
+    fail["on"] = True
+    worker.release()  # first restore fails, worker reconnects (after 5 s) and retries
+    assert wait_for(lambda: worker.status == STATUS_READY, timeout=8)
+    assert bulb.sent[-1][1].get("21") == "white"
+    worker.stop()

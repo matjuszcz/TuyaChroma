@@ -50,7 +50,9 @@ Zakładka **Konto Tuya**:
 2. Wpisz ten kod i kliknij **Pokaż kod QR**.
 3. Zeskanuj kod QR aplikacją (ikona skanera w prawym górnym rogu ekranu głównego) i potwierdź logowanie.
 
-Program pobierze urządzenia i przez około 10 s poszuka ich w sieci. Konto służy tylko do odczytania kluczy, a sterowanie odbywa się wyłącznie lokalnie. Program nie zapisuje tokenów logowania. Klucze żarówek są zapisywane zaszyfrowane (Windows DPAPI), w pliku `%APPDATA%\TuyaChroma\config.json`.
+Program pobierze urządzenia i przez około 10 s poszuka ich w sieci.
+
+> **Zapora Windows:** przy pierwszym wyszukiwaniu Windows zapyta, czy zezwolić programowi TuyaChroma na dostęp do sieci. Zaznacz **sieci prywatne** i kliknij *Zezwalaj*. Bez tego program nie znajdzie żarówek (nasłuchuje ich komunikatów w sieci lokalnej). Konto służy tylko do odczytania kluczy, a sterowanie odbywa się wyłącznie lokalnie. Program nie zapisuje tokenów logowania. Klucze żarówek są zapisywane zaszyfrowane (Windows DPAPI), w pliku `%APPDATA%\TuyaChroma\config.json`.
 
 > Program korzysta z tego samego logowania kodem QR co integracja Tuya w Home Assistant. Dlatego aplikacja Smart Life pokaże je jako autoryzację **„Home Assistant”**. Twoja dotychczasowa integracja Tuya w HA działa dalej.
 
@@ -94,7 +96,7 @@ Logi znajdziesz w *Ustawienia → Otwórz folder z logami* (`%APPDATA%\TuyaChrom
 |---|---|
 | „Razer niedostępny: Shared memory … not found” | Synapse nie działa albo moduł Chroma nie jest zainstalowany. Sprawdź, czy działa `RzSDKService`. |
 | Program czeka na grę, a gra ma efekty | Gra nie używa Razer Chroma albo ma je wyłączone w swoich ustawieniach. |
-| Żarówka: „nie znaleziono w sieci” | Kliknij *Szukaj w sieci*. Jeśli nie pomoże, wpisz IP ręcznie (znajdziesz je w routerze lub aplikacji Smart Life). Komputer i żarówki muszą być w tej samej sieci. |
+| Żarówka: „nie znaleziono w sieci” | Sprawdź, czy Zapora Windows zezwala TuyaChroma na dostęp do sieci prywatnej (*Zapora Windows → Zezwalaj aplikacji…*). Kliknij *Szukaj w sieci*. Jeśli nie pomoże, wpisz IP ręcznie (znajdziesz je w routerze lub aplikacji Smart Life). Komputer i żarówki muszą być w tej samej sieci. |
 | Żarówka: błąd połączenia | Kliknij *Testuj*. Wyłącz lokalne integracje tej żarówki w HA. Po ponownym sparowaniu żarówki w aplikacji zaloguj się ponownie, bo zmienia się wtedy jej klucz. |
 | „nieobsługiwana (brak koloru RGB)” | To żarówka tylko z białym światłem, więc nie może pokazywać kolorów. |
 | Logowanie QR się nie udaje | Kod użytkownika musi pochodzić z tej samej aplikacji, którą skanujesz. Kod QR jest ważny około 3 minut. |

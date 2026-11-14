@@ -132,6 +132,11 @@ class SyncService:
                         self.razer_status = f"Razer niedostępny: {err}"
                         self._stop.wait(5)
                         continue
+                    except OSError as err:
+                        _LOGGER.warning("Cannot open Razer Chroma: %s", err)
+                        self.razer_status = f"Razer niedostępny: {err}"
+                        self._stop.wait(5)
+                        continue
                 started = time.monotonic()
                 reader.wait(int(period * 1000))
                 try:
@@ -151,6 +156,9 @@ class SyncService:
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Razer reader crashed")
             self.razer_status = "błąd odczytu Razer (szczegóły w logu)"
+            for worker in self.workers:  # don't leave bulbs on a game color
+                worker.release()
+            self.game_active = False
         finally:
             if reader is not None:
                 reader.close()  # releases the mutexes from the owning thread

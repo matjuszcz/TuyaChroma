@@ -34,6 +34,10 @@ IDLE_LABELS = {
     "restore": "Wróć do stanu sprzed przejęcia (sterowanie z HA)",
     "keep": "Zostaw ostatni kolor z gry",
 }
+METHOD_LABELS = {
+    "colour": "Kolor (zalecany)",
+    "music": "Music (szybszy, nie każda żarówka)",
+}
 RAZER_GREEN = "#44d62c"
 
 
@@ -58,6 +62,9 @@ class App:
         self.root.geometry("900x600")
         self.root.minsize(760, 480)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Windows is shutting down / logging off: give the bulbs back right away
+        # (Tk may end the process before the system event thread gets its turn).
+        self.root.protocol("WM_SAVE_YOURSELF", self.on_session_end)
         self.root.bind("<Unmap>", self._on_unmap)
         self._build()
         self.refresh_devices()
@@ -165,6 +172,7 @@ class App:
         self.ed_ip = tk.StringVar()
         self.ed_version = tk.StringVar()
         self.ed_brightness = tk.DoubleVar(value=100)
+        self.ed_method = tk.StringVar()
         ttk.Checkbutton(self.editor, text="Steruj przez Razer", variable=self.ed_enabled).grid(row=0, column=0, sticky="w")
         ttk.Label(self.editor, text="Źródło koloru:").grid(row=0, column=1, sticky="e", padx=(16, 4))
         ttk.Combobox(self.editor, textvariable=self.ed_source, state="readonly", width=14,
@@ -179,6 +187,9 @@ class App:
                      values=["", "3.1", "3.3", "3.4", "3.5"]).grid(row=1, column=4, sticky="w", pady=(8, 0))
         ttk.Label(self.editor, text="Jasność %:").grid(row=2, column=1, sticky="e", padx=(16, 4), pady=(8, 0))
         ttk.Scale(self.editor, from_=10, to=100, variable=self.ed_brightness, length=140).grid(row=2, column=2, sticky="w", pady=(8, 0))
+        ttk.Label(self.editor, text="Tryb:").grid(row=2, column=3, sticky="e", padx=(16, 4), pady=(8, 0))
+        ttk.Combobox(self.editor, textvariable=self.ed_method, state="readonly", width=30,
+                     values=list(METHOD_LABELS.values())).grid(row=2, column=4, sticky="w", pady=(8, 0))
         btns = ttk.Frame(self.editor)
         btns.grid(row=1, column=5, rowspan=2, sticky="e", padx=(24, 0))
         ttk.Button(btns, text="Zapisz", command=self.save_editor).pack(fill="x")
@@ -299,6 +310,7 @@ class App:
         self.ed_ip.set(dev.ip)
         self.ed_version.set(dev.version)
         self.ed_brightness.set(round(dev.brightness * 100))
+        self.ed_method.set(METHOD_LABELS.get(dev.method, METHOD_LABELS["colour"]))
 
     def save_editor(self) -> None:
         dev = self._selected_device()
@@ -311,6 +323,9 @@ class App:
         dev.ip = self.ed_ip.get().strip()
         dev.version = self.ed_version.get().strip()
         dev.brightness = round(self.ed_brightness.get()) / 100
+        dev.method = _label_to_key(METHOD_LABELS, self.ed_method.get()) or "colour"
+        if dev.method not in METHOD_LABELS:
+            dev.method = "colour"
         self.refresh_devices()
         self.save_and_apply()
 
@@ -332,7 +347,10 @@ class App:
 
     def _scan_done(self, result: tuple[int, int]) -> None:
         matched, total = result
-        self.set_busy(f"Znaleziono w sieci {matched} z {total} urządzeń.")
+        msg = f"Znaleziono w sieci {matched} z {total} urządzeń."
+        if matched < total:
+            msg += " Brakujące: czy są włączone? Czy Zapora Windows nie blokuje programu?"
+        self.set_busy(msg)
         self.refresh_devices()
         self.save_and_apply()
 
@@ -566,6 +584,16 @@ class App:
             self.hide_to_tray()  # keep running in the tray
         else:
             self.quit()
+
+    def on_session_end(self) -> None:
+        _LOGGER.info("Windows session ending: releasing bulbs")
+        self.service.stop(timeout=4)
+        # If the shutdown gets cancelled, we are still alive: resume after a while.
+        self.root.after(20000, self._resume_after_cancelled_shutdown)
+
+    def _resume_after_cancelled_shutdown(self) -> None:
+        if self.config.settings.sync_enabled and not self.service.running:
+            self.run_bg(lambda: self.service.start(self.config))
 
     def quit(self) -> None:
         if self._quitting:
