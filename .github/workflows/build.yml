@@ -42,6 +42,18 @@ jobs:
           $v = python -c "import tuyachroma; print(tuyachroma.__version__)"
           "version=$v" >> $env:GITHUB_OUTPUT
 
+      - name: New version? (publish automatically when the version has no release yet)
+        id: rel
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "v${{ steps.ver.outputs.version }}" --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) { "publish=false" >> $env:GITHUB_OUTPUT; "v${{ steps.ver.outputs.version }} already published" }
+          else { "publish=true" >> $env:GITHUB_OUTPUT; "v${{ steps.ver.outputs.version }} will be published" }
+          exit 0
+
       - name: Release version matches the program
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
@@ -77,6 +89,25 @@ jobs:
           if (Select-String -Path "$env:APPDATA\TuyaChroma\log.txt" -Pattern "Traceback") { exit 1 }
           if (-not (Select-String -Path "$env:APPDATA\TuyaChroma\log.txt" -Pattern "Razer device database version")) { exit 1 }
 
+      - name: Self-update test (swap the running exe, like an update does)
+        shell: pwsh
+        run: |
+          $dir = "$env:RUNNER_TEMP\swap"
+          New-Item -ItemType Directory $dir | Out-Null
+          Copy-Item dist\TuyaChroma.exe "$dir\TuyaChroma.exe"
+          Copy-Item dist\TuyaChroma.exe "$dir\new.exe"
+          Add-Content "$dir\new.exe" "NEW-VERSION-MARKER"
+          $env:APPDATA = "$env:RUNNER_TEMP\appdata-swap"
+          $p = Start-Process "$dir\TuyaChroma.exe" -PassThru
+          Start-Sleep -Seconds 6
+          if ($p.HasExited) { Write-Error "exe did not start"; exit 1 }
+          python -c "from pathlib import Path; from tuyachroma import updater; d=Path(r'$dir'); old=updater.install(d/'new.exe', d/'TuyaChroma.exe'); print('swapped, previous kept as', old.name)"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (-not (Select-String -Path "$dir\TuyaChroma.exe" -Pattern "NEW-VERSION-MARKER" -SimpleMatch -Quiet)) { Write-Error "new exe not in place"; exit 1 }
+          Get-Process TuyaChroma -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          python -c "from pathlib import Path; from tuyachroma import updater; d=Path(r'$dir'); updater.cleanup_old(d/'TuyaChroma.exe'); assert not (d/'TuyaChroma.exe.old').exists(); print('old version removed')"
+
       - name: Package
         shell: pwsh
         run: |
@@ -94,7 +125,10 @@ jobs:
             TuyaChroma-windows.zip.sha256
 
       - name: Release (on tag, or manual run with "release")
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
+        if: >-
+          startsWith(github.ref, 'refs/tags/v')
+          || (github.event_name == 'workflow_dispatch' && inputs.release)
+          || steps.rel.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}

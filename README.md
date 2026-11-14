@@ -196,6 +196,8 @@ pytest
 python -m tuyachroma        # uruchomienie z kodu źródłowego
 ```
 
-Exe budowany jest w GitHub Actions (`.github/workflows/build.yml`). Wydanie powstaje po wypchnięciu tagu `v*`.
+Exe budowany jest w GitHub Actions (`.github/workflows/build.yml`) przy każdej zmianie na `main`.
+
+**Nowa wersja:** zmień `__version__` w `tuyachroma/__init__.py` i wypchnij na `main`. Po przejściu testów GitHub Actions sam opublikuje wydanie `v<wersja>` z plikiem zip i sumą kontrolną, a zainstalowane programy zaproponują aktualizację. Wydanie można też opublikować ręcznie (*Actions → Run workflow → Opublikuj wydanie*) albo tagiem `v*`.
 
 Licencje: odczyt danych Razer Chroma bazuje na [RazerSdkReader](https://github.com/diogotr7/RazerSdkReader) (MIT). Szczegóły w [NOTICE](NOTICE).
