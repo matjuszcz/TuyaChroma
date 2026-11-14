@@ -38,11 +38,15 @@ def test_config_roundtrip(tmp_path) -> None:
 
 def test_merge_cloud_keeps_settings_and_apply_scan() -> None:
     config = AppConfig(devices=[dev("a", enabled=True, source="mouse", local_key="old")])
+    config.devices.append(dev("gone"))
     new = config.merge_cloud([
-        CloudDevice("a", "Renamed", "newkey", "dj", "Bulb"),
-        CloudDevice("b", "Strip", "key2", "dd", "Strip"),
+        CloudDevice("a", "Renamed", "newkey", "dj", "Bulb", rgb=True),
+        CloudDevice("b", "Strip", "key2", "dd", "Strip", rgb=True),
+        CloudDevice("w", "White bulb", "key3", "dj", "Bulb", rgb=False),
+        CloudDevice("p", "Plug", "key4", "cz", "Plug", rgb=False),
     ])
     assert new == 1
+    assert [d.id for d in config.devices] == ["a", "b"]  # only RGB lights, stale removed
     a = config.device("a")
     assert (a.name, a.local_key, a.enabled, a.source) == ("Renamed", "newkey", True, "mouse")
     b = config.device("b")
@@ -73,10 +77,17 @@ def test_account_login_flow() -> None:
                 "terminal_id": "t", "endpoint": "https://apigw.tuyaeu.com", "username": "me@x"}),
     ]
     manager = MagicMock()
+    def cust(i, name, cat, codes, key="k", sub=False):
+        return SimpleNamespace(id=i, name=name, local_key=key, category=cat, product_name="",
+                               sub=sub, function={c: None for c in codes}, status_range={}, status={})
+
     manager.device_map = {
-        "1": SimpleNamespace(id="1", name="Lamp", local_key="k1", category="dj", product_name="", sub=False),
-        "2": SimpleNamespace(id="2", name="Plug", local_key="k2", category="cz", product_name="", sub=False),
-        "3": SimpleNamespace(id="3", name="Zigbee", local_key="", category="dj", product_name="", sub=True),
+        "1": cust("1", "Lamp RGB", "dj", ["switch_led", "work_mode", "colour_data_v2"]),
+        "2": cust("2", "Plug", "cz", ["switch_1"]),
+        "3": cust("3", "Zigbee", "dj", ["colour_data"], key="", sub=True),
+        "4": cust("4", "White lamp", "dj", ["switch_led", "bright_value_v2", "temp_value_v2"]),
+        "5": cust("5", "LED strip", "dd", ["switch_led", "colour_data"]),
+        "6": cust("6", "Old bulb", "dj", []),  # no data points: trust the category
     }
     with patch("tuya_sharing.LoginControl", return_value=control), \
          patch("tuya_sharing.Manager", return_value=manager) as mgr:
@@ -86,8 +97,9 @@ def test_account_login_flow() -> None:
         info = account.poll_login()
         devices = account.fetch_devices(info)
     assert account.username == "me@x" and account.user_code == "CODE"
-    assert [d.name for d in devices] == ["Lamp", "Plug"]  # lights first, no sub-devices
-    assert devices[0].is_light and not devices[1].is_light
+    rgb = {d.name: d.rgb for d in devices}
+    assert rgb == {"Lamp RGB": True, "LED strip": True, "Old bulb": True,
+                   "Plug": False, "White lamp": False}  # no sub-devices
     assert mgr.call_args.args[2:4] == ("t", "https://apigw.tuyaeu.com")
 
 
@@ -165,7 +177,8 @@ def test_sync_service_lifecycle() -> None:
         workers.append(w)
         return w
 
-    service = SyncService(reader_factory=FakeReader, worker_factory=worker_factory)
+    service = SyncService(reader_factory=FakeReader, worker_factory=worker_factory,
+                          service_check=lambda: True)
     config = AppConfig(devices=[dev("a", enabled=True), dev("b", enabled=True, source="mouse"),
                                 dev("c"), dev("d", enabled=True, ip="")])
     service.start(config)
@@ -185,7 +198,7 @@ def test_sync_service_waits_for_razer() -> None:
     def no_razer(_sources):
         raise RazerUnavailable("Synapse not running")
 
-    service = SyncService(reader_factory=no_razer, worker_factory=Recorder)
+    service = SyncService(reader_factory=no_razer, worker_factory=Recorder, service_check=lambda: False)
     service.start(AppConfig(devices=[dev("a", enabled=True)]))
     time.sleep(0.1)
     assert "Synapse not running" in service.razer_status
@@ -227,13 +240,13 @@ def test_gui_login_and_select(tmp_path, monkeypatch) -> None:
             return {"username": "me@x"} if self.polls > 1 else None
 
         def fetch_devices(self, info):
-            return [CloudDevice("bf1", "Lamp", "k" * 16, "dj", "Bulb")]
+            return [CloudDevice("bf1", "Lamp", "k" * 16, "dj", "Bulb", rgb=True),
+                    CloudDevice("bf2", "White", "k" * 16, "dj", "Bulb", rgb=False)]
 
     monkeypatch.setattr(cloud, "TuyaAccount", FakeAccount)
     monkeypatch.setattr(gui, "scan", lambda _s: {"bf1": {"id": "bf1", "ip": "10.0.0.5", "version": "3.3"}})
-    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder)
-    app = gui.App(AppConfig(), service, start_hidden=False)
-    app._tray = None
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(AppConfig(), service, start_hidden=False, use_tray=False)
     try:
         app.user_code_var.set("CODE")
         app.start_login()
@@ -245,7 +258,7 @@ def test_gui_login_and_select(tmp_path, monkeypatch) -> None:
             time.sleep(0.02)
         assert app.config.username == "me@x"
         assert app.config.devices[0].ip == "10.0.0.5"
-        assert app.tree.exists("bf1")
+        assert app.tree.exists("bf1") and not app.tree.exists("bf2")
 
         # Click the ✓ column to hand the lamp to Razer
         app.config.devices[0].enabled = False
@@ -264,3 +277,40 @@ def test_gui_login_and_select(tmp_path, monkeypatch) -> None:
     finally:
         service.stop()
         app.root.destroy()
+
+
+def test_bulbs_return_to_ha_when_synapse_dies(monkeypatch) -> None:
+    from tuyachroma import engine
+
+    monkeypatch.setattr(engine, "SERVICE_CHECK_INTERVAL", 0.05)
+    FakeReader.instances.clear()
+    alive = {"v": True}
+    workers = []
+
+    def worker_factory(cfg):
+        w = Recorder(cfg)
+        workers.append(w)
+        return w
+
+    def reader_factory(sources):
+        if not alive["v"]:
+            raise RazerUnavailable("RzSDKService nie działa")
+        return FakeReader(sources)
+
+    service = SyncService(reader_factory=reader_factory, worker_factory=worker_factory,
+                          service_check=lambda: alive["v"])
+    service.start(AppConfig(devices=[dev("a", enabled=True)]))
+    deadline = time.time() + 2
+    while time.time() < deadline and not service.game_active:
+        time.sleep(0.01)
+    assert service.game_active
+    alive["v"] = False  # Synapse crashes; shared memory still holds the last game color
+    deadline = time.time() + 2
+    while time.time() < deadline and service.game_active:
+        time.sleep(0.01)
+    assert not service.game_active
+    assert workers[0].calls[-1] == "release"
+    assert FakeReader.instances[0].closed
+    time.sleep(0.2)
+    assert not service.game_active and "nie działa" in service.razer_status
+    service.stop()

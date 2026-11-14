@@ -10,7 +10,9 @@ import time
 from .bulbs import BulbConfig, BulbWorker
 from .colors import adjust, reduce_colors, zone_indices
 from .config import AppConfig
-from .razer import ChromaReader, Frame, RazerUnavailable
+from .razer import ChromaReader, Frame, RazerUnavailable, razer_service_running
+
+SERVICE_CHECK_INTERVAL = 3.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,9 +44,11 @@ class SyncService:
         self,
         reader_factory: Callable[[list[str]], ChromaReader] = ChromaReader,
         worker_factory: Callable[[BulbConfig], BulbWorker] = BulbWorker,
+        service_check: Callable[[], bool] = razer_service_running,
     ) -> None:
         self._reader_factory = reader_factory
         self._worker_factory = worker_factory
+        self._service_check = service_check
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -105,8 +109,21 @@ class SyncService:
             return
         period = 1.0 / max(1.0, fps)
         reader: ChromaReader | None = None
+        last_check = time.monotonic()
         try:
             while not self._stop.is_set():
+                if reader is not None and time.monotonic() - last_check > SERVICE_CHECK_INTERVAL:
+                    last_check = time.monotonic()
+                    if not self._service_check():
+                        # Synapse died: its shared memory keeps the last frame, so
+                        # don't trust it - give the bulbs back to Home Assistant.
+                        _LOGGER.warning("Razer SDK service stopped, releasing bulbs")
+                        for worker in self.workers:
+                            worker.release()
+                        self.game_active = False
+                        reader.close()
+                        reader = None
+                        continue
                 if reader is None:
                     try:
                         reader = self._reader_factory(sources)

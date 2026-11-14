@@ -19,6 +19,9 @@ _LOGGER = logging.getLogger(__name__)
 TUYA_CLIENT_ID = "HA_3y9q4ak7g4ephrvke"
 TUYA_SCHEMA = "haauthorize"
 
+# Data points that mean "can show RGB colors".
+RGB_CODES = {"colour_data", "colour_data_v2", "colour_data_raw"}
+
 # Tuya product categories that are lights.
 LIGHT_CATEGORIES = {
     "dc", "dd", "dj", "dsd", "fsd", "fwd", "fwl", "gyd", "mbd",
@@ -37,6 +40,7 @@ class CloudDevice:
     local_key: str
     category: str
     product_name: str
+    rgb: bool = False
 
     @property
     def is_light(self) -> bool:
@@ -47,12 +51,19 @@ def _device(customer: Any) -> CloudDevice | None:
     key = getattr(customer, "local_key", None)
     if not key or getattr(customer, "sub", False):
         return None  # Zigbee/BLE sub-devices have no local key of their own
+    category = getattr(customer, "category", "") or ""
+    codes = set(getattr(customer, "function", None) or {}) | set(
+        getattr(customer, "status_range", None) or {}
+    ) | set(getattr(customer, "status", None) or {})
+    # Prefer the device's own data points; without them, trust the category.
+    rgb = bool(codes & RGB_CODES) if codes else category in LIGHT_CATEGORIES
     return CloudDevice(
         id=customer.id,
         name=getattr(customer, "name", None) or customer.id,
         local_key=key,
-        category=getattr(customer, "category", "") or "",
+        category=category,
         product_name=getattr(customer, "product_name", "") or "",
+        rgb=rgb and category in LIGHT_CATEGORIES,
     )
 
 
@@ -105,5 +116,5 @@ class TuyaAccount:
         )
         manager.update_device_cache()
         devices = [d for c in manager.device_map.values() if (d := _device(c)) is not None]
-        devices.sort(key=lambda d: (not d.is_light, d.name.lower()))
+        devices.sort(key=lambda d: d.name.lower())
         return devices

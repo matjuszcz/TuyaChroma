@@ -359,6 +359,50 @@ class RazerUnavailable(Exception):
     """Razer SDK service is not running or shared memory is not available."""
 
 
+SDK_SERVICE_EXE = "rzsdkservice.exe"
+
+
+def razer_service_running() -> bool:
+    """Is Razer's Chroma SDK service (RzSDKService.exe) running? (Windows)"""
+    return process_running(SDK_SERVICE_EXE)
+
+
+def process_running(exe_name: str) -> bool:
+    """Is a process with this executable name running? (Windows)"""
+    if sys.platform != "win32":
+        return False
+    from ctypes import wintypes as W  # noqa: PLC0415
+
+    class PROCESSENTRY32W(C.Structure):
+        _fields_ = [
+            ("dwSize", W.DWORD), ("cntUsage", W.DWORD), ("th32ProcessID", W.DWORD),
+            ("th32DefaultHeapID", C.c_size_t), ("th32ModuleID", W.DWORD),
+            ("cntThreads", W.DWORD), ("th32ParentProcessID", W.DWORD),
+            ("pcPriClassBase", C.c_long), ("dwFlags", W.DWORD), ("szExeFile", C.c_wchar * 260),
+        ]
+
+    k32 = C.WinDLL("kernel32", use_last_error=True)
+    k32.CreateToolhelp32Snapshot.restype = W.HANDLE
+    k32.CreateToolhelp32Snapshot.argtypes = [W.DWORD, W.DWORD]
+    k32.Process32FirstW.argtypes = [W.HANDLE, C.POINTER(PROCESSENTRY32W)]
+    k32.Process32NextW.argtypes = [W.HANDLE, C.POINTER(PROCESSENTRY32W)]
+    k32.CloseHandle.argtypes = [W.HANDLE]
+    snap = k32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == W.HANDLE(-1).value:
+        return True  # cannot tell; assume running
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = C.sizeof(PROCESSENTRY32W)
+        ok = k32.Process32FirstW(snap, C.byref(entry))
+        while ok:
+            if entry.szExeFile.lower() == exe_name.lower():
+                return True
+            ok = k32.Process32NextW(snap, C.byref(entry))
+        return False
+    finally:
+        k32.CloseHandle(snap)
+
+
 class ChromaReader:
     """Holds the emulator mutexes and reads device snapshots (Windows only)."""
 
@@ -370,6 +414,8 @@ class ChromaReader:
     def __init__(self, devices: list[str]) -> None:
         if sys.platform != "win32":
             raise RazerUnavailable("Razer Chroma can only be read on Windows")
+        if not razer_service_running():
+            raise RazerUnavailable("Razer Synapse / Chroma SDK (RzSDKService) nie działa")
         from ctypes import wintypes as W  # noqa: PLC0415
 
         self._W = W

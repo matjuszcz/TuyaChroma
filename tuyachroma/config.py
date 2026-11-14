@@ -82,9 +82,16 @@ class AppConfig:
         return next((d for d in self.devices if d.id == dev_id), None)
 
     def merge_cloud(self, cloud_devices: list) -> int:
-        """Add/update devices from the account; keeps per-bulb settings. Returns #new."""
+        """Add/update RGB lights from the account; keeps per-bulb settings. Returns #new.
+
+        Only RGB bulbs, lamps and LED strips are kept; devices that disappeared
+        from the account (or are not RGB) are removed.
+        """
+        rgb = [cd for cd in cloud_devices if cd.rgb]
+        keep = {cd.id for cd in rgb}
+        self.devices = [d for d in self.devices if d.id in keep]
         new = 0
-        for cd in cloud_devices:
+        for cd in rgb:
             dev = self.device(cd.id)
             if dev is None:
                 self.devices.append(Device(

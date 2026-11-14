@@ -39,7 +39,17 @@ def test_reader_without_synapse_reports_unavailable() -> None:
         razer.ChromaReader(["headset"])
 
 
-def test_reader_reads_published_memory() -> None:
+def test_process_running() -> None:
+    import os
+
+    exe = os.path.basename(sys.executable)
+    assert razer.process_running(exe)
+    assert not razer.process_running("definitely-not-running-123.exe")
+    assert razer.razer_service_running() is False  # no Synapse on the build machine
+
+
+def test_reader_reads_published_memory(monkeypatch) -> None:
+    monkeypatch.setattr(razer, "razer_service_running", lambda: True)
     spec = razer.DEVICES["keyboard"]
     k32, mapping, view = publish(spec.file_name, dump("keyboard", write_index=9))
     try:

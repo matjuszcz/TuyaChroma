@@ -42,7 +42,8 @@ def _label_to_key(labels: dict[str, str], label: str) -> str:
 
 
 class App:
-    def __init__(self, config: AppConfig, service: SyncService, start_hidden: bool) -> None:
+    def __init__(self, config: AppConfig, service: SyncService, start_hidden: bool,
+                 use_tray: bool = True) -> None:
         self.config = config
         self.service = service
         self._queue: queue.Queue[Callable[[], None]] = queue.Queue()
@@ -58,7 +59,8 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._build()
         self.refresh_devices()
-        self._start_tray()
+        if use_tray:
+            self._start_tray()
         if start_hidden and self._tray is not None:
             self.root.withdraw()
         self.root.after(200, self._pump)
@@ -137,7 +139,7 @@ class App:
 
         bar = ttk.Frame(tab)
         bar.pack(fill="x", pady=(0, 6))
-        ttk.Label(bar, text="Zaznacz żarówki, którymi ma sterować Razer (kliknij w kolumnę ✓).").pack(side="left")
+        ttk.Label(bar, text="Światła RGB z Twojego konta. Zaznacz te, którymi ma sterować Razer (kolumna ✓).").pack(side="left")
         ttk.Button(bar, text="Szukaj w sieci", command=self.scan_lan).pack(side="right")
 
         cols = ("on", "name", "ip", "version", "source", "zone", "status")
@@ -375,7 +377,7 @@ class App:
     def _update_account_label(self) -> None:
         if self.config.username or self.config.devices:
             who = self.config.username or "konto Tuya"
-            self.account_var.set(f"Zalogowano: {who} – {len(self.config.devices)} urządzeń")
+            self.account_var.set(f"Zalogowano: {who} – {len(self.config.devices)} świateł RGB")
         else:
             self.account_var.set("Nie zalogowano")
 
@@ -431,8 +433,11 @@ class App:
             self.config.username = info.get("username") or ""
             self.config.user_code = account.user_code or ""
             new = self.config.merge_cloud(devices)
-            lights = sum(1 for d in devices if d.is_light)
-            self.login_var.set(f"Zalogowano. Pobrano {len(devices)} urządzeń ({lights} świateł, nowych: {new}).")
+            rgb = sum(1 for d in devices if d.rgb)
+            self.login_var.set(
+                f"Zalogowano. Na koncie jest {len(devices)} urządzeń, w tym {rgb} świateł RGB "
+                f"(nowych: {new}). Inne urządzenia są pomijane."
+            )
             save(self.config)
             self._update_account_label()
             self.refresh_devices()
