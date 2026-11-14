@@ -314,3 +314,44 @@ def test_bulbs_return_to_ha_when_synapse_dies(monkeypatch) -> None:
     time.sleep(0.2)
     assert not service.game_active and "nie działa" in service.razer_status
     service.stop()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_minimize_and_close_go_to_tray(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui
+
+    notes = []
+
+    class FakeTray:
+        def notify(self, msg, title):
+            notes.append(msg)
+
+        def stop(self):
+            pass
+
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(AppConfig(), service, start_hidden=False, use_tray=False)
+    app._tray = FakeTray()
+    try:
+        app.root.update()
+        if sys.platform == "win32":
+            app.root.iconify()  # real minimize button
+        else:  # no window manager under Xvfb: simulate the minimize event
+            real_state = app.root.state
+            monkeypatch.setattr(app.root, "state", lambda *a: "iconic" if not a else real_state(*a))
+            app._on_unmap(SimpleNamespace(widget=app.root))
+            monkeypatch.setattr(app.root, "state", real_state)
+        for _ in range(50):
+            app.root.update()
+            time.sleep(0.01)
+        assert app.root.state() == "withdrawn"
+        assert len(notes) == 1  # hint shown once
+        app.show()
+        app.root.update()
+        app.on_close()  # X button
+        app.root.update()
+        assert app.root.state() == "withdrawn" and len(notes) == 1
+        assert not app._quitting  # still running
+    finally:
+        app.root.destroy()

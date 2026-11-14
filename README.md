@@ -69,12 +69,14 @@ Wskazówki:
 
 ### 3. Ustawienia
 
-* **Uruchamiaj razem z Windows** (domyślnie włączone): program startuje po zalogowaniu do Windows, zminimalizowany do zasobnika obok zegara.
+* **Uruchamiaj razem z Windows** (domyślnie włączone): program startuje po zalogowaniu do Windows od razu w zasobniku, bez otwierania okna, i przejmuje wybrane żarówki, gdy gra wyśle efekt. Wpis autostartu znajdziesz też w *Menedżer zadań → Aplikacje autostartu* jako „TuyaChroma”.
+* **Startuj zminimalizowany do zasobnika**: przy autostarcie okno się nie otwiera. Wyłącz, jeśli wolisz widzieć okno po starcie.
 * **Gdy żadna gra nie wysyła efektów:** *wróć do stanu sprzed przejęcia* (domyślnie, czyli sterowanie z HA) albo *zostaw ostatni kolor z gry*.
 
 ## Na co dzień
 
-* Program działa w **zasobniku** (zielona ikona obok zegara). Zamknięcie okna chowa je do zasobnika.
+* Program działa w **zasobniku** (zielona ikona obok zegara). Zarówno minimalizacja (**_**), jak i zamknięcie okna (**X**) chowają je do zasobnika. Program działa wtedy dalej. Całkowicie zamyka go dopiero *Zakończ* w menu ikony.
+* Jeśli ikona jest ukryta pod strzałką **^** obok zegara, przeciągnij ją na pasek, żeby była zawsze widoczna.
 * Menu ikony: **Otwórz**, **Wstrzymaj sterowanie** (żarówki od razu wracają do HA) albo **Włącz sterowanie**, **Zakończ**.
 * Kropka w oknie programu: 🟢 efekt z gry jest aktywny, 🔵 program czeka na grę, 🟡 wymaga uwagi (np. Synapse nie działa albo nie wybrano żarówek).
 

@@ -64,3 +64,29 @@ def test_reader_reads_published_memory(monkeypatch) -> None:
         k32.CloseHandle(mapping)
     assert frame is not None and frame.active
     assert (221, 121, 0) in frame.colors
+
+
+def test_autostart_registry(monkeypatch) -> None:
+    import winreg
+
+    from tuyachroma import winsys
+
+    monkeypatch.setattr(winsys, "APP_NAME", "TuyaChromaTest")
+    try:
+        winsys.set_autostart(True, minimized=True)
+        assert winsys.get_autostart()
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, winsys.RUN_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, "TuyaChromaTest")
+        assert value.endswith("--minimized") and sys.executable in value
+    finally:
+        winsys.set_autostart(False)
+    assert not winsys.get_autostart()
+
+
+def test_single_instance() -> None:
+    from tuyachroma import winsys
+
+    assert winsys.acquire_single_instance()
+    first = winsys._instance_handle
+    assert not winsys.acquire_single_instance()  # a second copy is detected
+    winsys._instance_handle = first

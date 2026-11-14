@@ -51,18 +51,21 @@ class App:
         self._account = None
         self._login_deadline = 0.0
         self._quitting = False
+        self._tray_hint_shown = False
 
         self.root = tk.Tk()
         self.root.title("TuyaChroma")
         self.root.geometry("900x600")
         self.root.minsize(760, 480)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.bind("<Unmap>", self._on_unmap)
         self._build()
         self.refresh_devices()
         if use_tray:
             self._start_tray()
         if start_hidden and self._tray is not None:
             self.root.withdraw()
+            self._tray_hint_shown = True  # autostart: stay quiet
         self.root.after(200, self._pump)
         self.root.after(1000, self._tick)
 
@@ -540,9 +543,27 @@ class App:
         self.root.lift()
         self.root.focus_force()
 
+    def hide_to_tray(self) -> None:
+        self.root.withdraw()
+        if not self._tray_hint_shown and self._tray is not None:
+            self._tray_hint_shown = True
+            try:
+                self._tray.notify(
+                    "TuyaChroma działa dalej w zasobniku obok zegara. "
+                    "Kliknij ikonę, żeby otworzyć; „Zakończ” oddaje żarówki do HA.",
+                    "TuyaChroma",
+                )
+            except Exception:  # noqa: BLE001 - notifications are optional
+                pass
+
+    def _on_unmap(self, event: tk.Event) -> None:
+        # Minimize button (_) -> hide to the tray instead of the taskbar.
+        if event.widget is self.root and self._tray is not None and self.root.state() == "iconic":
+            self.root.after(0, self.hide_to_tray)
+
     def on_close(self) -> None:
         if self._tray is not None:
-            self.root.withdraw()  # keep running in the tray
+            self.hide_to_tray()  # keep running in the tray
         else:
             self.quit()
 
