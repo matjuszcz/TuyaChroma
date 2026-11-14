@@ -12,14 +12,20 @@ from typing import Any
 
 from . import dpapi
 from .bulbs import BulbConfig
-from .effects import EFFECTS, EffectSettings
+from .profiles import Profile, default_profiles
 from .razer import DEVICES
 
 _LOGGER = logging.getLogger(__name__)
 
 SOURCES = list(DEVICES)
 ZONES = ["all", "left", "center", "right", "top", "bottom"]
-IDLE_MODES = ["effect", "restore", "keep"]
+# When Razer runs but no game drives Chroma:
+#   full    = the program plays the profile on all Razer devices AND the bulbs (in sync)
+#   effect  = the program plays the profile on the bulbs only (Razer keeps its Synapse profile)
+#   restore = give the bulbs back (Home Assistant / Tuya app)
+#   keep    = keep the last game color
+IDLE_MODES = ["full", "effect", "restore", "keep"]
+LEGACY_EFFECTS = {"wave": "wave", "spectrum": "spectrum", "breathing": "breathing", "static": "static"}
 
 
 @dataclass
@@ -64,12 +70,19 @@ class Device:
 class Settings:
     autostart: bool = True
     start_minimized: bool = True
-    # When Razer runs but no game sends Chroma effects:
-    # effect = play an ambient effect, restore = give bulbs back, keep = last game color
-    idle: str = "effect"
-    effect: EffectSettings = field(default_factory=EffectSettings)
+    idle: str = "effect"  # see IDLE_MODES
+    profiles: list[Profile] = field(default_factory=default_profiles)
+    active_profile: str = "Wave"
+    bulb_effect_rate: float = 1.0  # bulb color changes per second while a profile plays
     fps: float = 20
     sync_enabled: bool = True
+
+    @property
+    def profile(self) -> Profile:
+        for p in self.profiles:
+            if p.name == self.active_profile:
+                return p
+        return self.profiles[0] if self.profiles else Profile()
 
 
 @dataclass
@@ -148,19 +161,35 @@ def load(path: Path | None = None) -> AppConfig:
         except (OSError, TypeError, ValueError) as err:
             _LOGGER.warning("Skipping device %s: %s", raw.get("id"), err)
     s = dict(data.get("settings", {}))
-    fx = s.pop("effect", None)
+    legacy_fx = s.pop("effect", None)  # 1.1: a single effect
+    raw_profiles = s.pop("profiles", None)
     names = {f.name for f in fields(Settings)}
     settings = Settings(**{k: v for k, v in s.items() if k in names})
-    if isinstance(fx, dict):
-        fx_names = {f.name for f in fields(EffectSettings)}
-        settings.effect = EffectSettings(**{k: v for k, v in fx.items() if k in fx_names})
+    if isinstance(raw_profiles, list) and raw_profiles:
+        settings.profiles = [Profile.from_dict(p) for p in raw_profiles if isinstance(p, dict)]
+    elif isinstance(legacy_fx, dict):
+        # 1.1 -> profiles: keep the user's effect as the active profile
+        period = float(legacy_fx.get("period", 8.0) or 8.0)
+        mine = Profile(
+            name="Mój efekt",
+            effect=LEGACY_EFFECTS.get(legacy_fx.get("effect", "wave"), "wave"),
+            color1=legacy_fx.get("color", "#44d62c"),
+            speed=round(16 / max(1.6, period)),
+            brightness=legacy_fx.get("brightness", 1.0),
+        )
+        mine.sanitize()
+        settings.profiles = [mine] + default_profiles()
+        settings.active_profile = mine.name
     elif "settings" in data and settings.idle == "restore":
         # Saved by 1.0, where "restore" was only the default: use the new default.
         settings.idle = "effect"
+    if not settings.profiles:
+        settings.profiles = default_profiles()
     if settings.idle not in IDLE_MODES:
         settings.idle = "effect"
-    if settings.effect.effect not in EFFECTS:
-        settings.effect.effect = "wave"
+    if settings.active_profile not in {p.name for p in settings.profiles}:
+        settings.active_profile = settings.profiles[0].name
+    settings.bulb_effect_rate = max(0.5, min(5.0, float(settings.bulb_effect_rate)))
     return AppConfig(
         devices=devices, settings=settings,
         username=data.get("username", ""), user_code=data.get("user_code", ""),

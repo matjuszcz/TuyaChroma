@@ -19,23 +19,56 @@ Komputer wyłączony: Home Assistant / aplikacja Tuya ────────�
 * **Logowanie kontem Tuya / Smart Life jako zwykły użytkownik.** Wpisujesz kod użytkownika z aplikacji i skanujesz kod QR. Program pobiera listę żarówek i ich klucze lokalne, a potem sam znajduje je w sieci (adres IP i wersję protokołu).
 * **Wybierasz żarówki**, którymi ma sterować Razer, oraz dla każdej źródło koloru (klawiatura, mysz, Chroma Link…) i strefę (np. lewa strona klawiatury).
 * **Kolory z gier** program odczytuje z usługi Razer Chroma SDK (tak samo jak [Artemis RGB](https://artemis-rgb.com/)) i wysyła do żarówek **lokalnie** (bez chmury, kilka razy na sekundę).
-* **Efekt poza grą:** gdy Razer działa, a żadna gra nie wysyła efektów, program odtwarza na żarówkach wybrany efekt:
-  * **Wave**: fala tęczy przechodząca kolejno przez żarówki;
-  * **Spectrum**: wszystkie żarówki razem zmieniają kolory;
-  * **Oddychanie**: pulsujący kolor;
-  * **Stały kolor**.
+* **Gdy Razer działa, ale nie ma gry** (do wyboru w *Ustawieniach*):
+  * **Pełna synchronizacja**: program odtwarza wybrany **profil efektów** jednocześnie na **wszystkich urządzeniach Razer Chroma** i na żarówkach. Wszystko świeci identycznie i równo. Gdy uruchomisz grę z Chroma, gra przejmuje urządzenia i żarówki. Po zamknięciu programu urządzenia Razer wracają do profilu z Synapse.
+  * **Profil tylko na żarówkach**: urządzenia Razer zostają przy profilu z Synapse, a żarówki odtwarzają podobny efekt (domyślnie). Nie jest on zsynchronizowany z Razerem co do sekundy.
+  * **Oddaj żarówki do HA** albo **zostaw ostatni kolor z gry**.
 
-  Efekt zmienia kolor najwyżej raz na sekundę (żarówki same płynnie przechodzą między kolorami). Działa godzinami, więc nie zasypuje żarówek poleceniami. Kolory z gier są aktualizowane kilka razy na sekundę.
 * **Przejęcie i oddanie:**
   * przy przejęciu program zapamiętuje aktualny stan żarówki (ustawiony np. w HA albo w aplikacji Tuya);
   * gdy wyłączysz lub uśpisz komputer, zamkniesz Synapse lub program albo wstrzymasz sterowanie, żarówka **wraca do zapamiętanego stanu** i dalej działa z HA.
+
+### Profile efektów (jak w Synapse / Chroma Studio)
+
+Zakładka **Profile efektów** to lista profili, podobna do profili w Synapse. Każdy profil to efekt plus kolory, tryb kolorów (jeden, dwa, losowe), kierunek, prędkość, gęstość i jasność. Podgląd na żywo pokazuje efekt na klawiaturze, myszy, podkładce, słuchawkach, keypadzie, Chroma Link i żarówkach. Aktywny profil (★) przełączysz też z menu ikony w zasobniku (*Profil efektu*).
+
+| Efekt | Opis |
+|---|---|
+| **Wave** | fala tęczy w wybranym kierunku (w prawo, w lewo, w dół, w górę) |
+| **Spectrum Cycling** | wszystko razem przechodzi przez kolory tęczy |
+| **Breathing** | oddychanie: jeden kolor, dwa na zmianę albo losowe |
+| **Static** | stały kolor |
+| **Wheel** | tęczowe koło kręcące się wokół środka urządzenia |
+| **Starlight** | migające gwiazdy (gęstość, kolory) |
+| **Fire** | ogień od dołu urządzenia |
+| **Reactive** | podświetla naciśnięty klawisz; pozostałe urządzenia błyskają |
+| **Ripple** | fala rozchodząca się od naciśniętego klawisza |
+| **Ambient Awareness** | kolory z ekranu na urządzeniach i żarówkach |
+
+**Obsługiwane urządzenia Razer:** program wysyła efekt do wszystkich sześciu kategorii Chroma SDK, w pełnej siatce diod każdej z nich:
+
+| Kategoria | Siatka | Przykłady |
+|---|---|---|
+| klawiatura | 6×22 | klawiatury, laptopy Blade |
+| mysz | 9×7 | myszy |
+| podkładka | 15 | podkładki, stacje (Base Station, Mouse Dock) |
+| słuchawki | 5 | słuchawki Kraken, BlackShark |
+| keypad | 4×5 | Tartarus, Orbweaver |
+| Chroma Link | 5 | kontrolery, głośniki, inne urządzenia Chroma i urządzenia partnerów |
+
+Synapse sam przypisuje każde urządzenie do jednej z tych kategorii, więc efekt trafia na cały Twój sprzęt Chroma, również na kontroler.
+
+**Uwagi:**
+* *Reactive* i *Ripple* odczytują, **który** klawisz naciśnięto (tylko jego pozycję, nic nie jest zapisywane), tak samo jak Synapse. Program robi to tylko przy tych dwóch efektach.
+* *Ambient Awareness* kilka razy na sekundę robi pomniejszoną kopię ekranu, żeby wyliczyć kolory. Nic nie jest zapisywane ani wysyłane.
+* W *Synapse → Chroma → Chroma Apps (Aplikacje)* musi być włączona obsługa aplikacji Chroma, a TuyaChroma nie może być tam wyłączony.
 
 ### Co jest przechwytywane
 
 | Źródło | Działa? |
 |---|---|
 | Gry i aplikacje z Razer Chroma (Chroma SDK), np. efekty reagujące na rozgrywkę | ✅ |
-| Efekty z profilu Synapse / Chroma Studio (wave, spectrum itp. poza grą) | ❌ nie da się ich odczytać: Synapse udostępnia je tylko aplikacjom z oficjalnym Razer App ID. Zamiast tego program sam odtwarza **podobny efekt**, który wybierasz w *Ustawieniach*. Nie zmienia się on sam po zmianie profilu w Synapse. |
+| Efekty z profilu Synapse / Chroma Studio (wave, spectrum itp. poza grą) | ❌ nie da się ich odczytać: Synapse udostępnia je tylko aplikacjom z oficjalnym Razer App ID. Zamiast tego w trybie **pełnej synchronizacji** program sam odtwarza profil na urządzeniach Razer i żarówkach (równo). W trybie *tylko na żarówkach* żarówki odtwarzają podobny efekt. |
 
 ## Wymagania
 
@@ -85,9 +118,11 @@ Wskazówki:
 * **Uruchamiaj razem z Windows** (domyślnie włączone): program startuje po zalogowaniu do Windows od razu w zasobniku, bez otwierania okna, i przejmuje wybrane żarówki, gdy gra wyśle efekt. Wpis autostartu znajdziesz też w *Menedżer zadań → Aplikacje autostartu* jako „TuyaChroma”.
 * **Startuj zminimalizowany do zasobnika**: przy autostarcie okno się nie otwiera. Wyłącz, jeśli wolisz widzieć okno po starcie.
 * **Gdy Razer działa, ale żadna gra nie wysyła efektów:**
-  * *Odtwarzaj efekt* (domyślnie Wave). Wybierz efekt podobny do profilu w Synapse oraz kolor (dla oddychania i stałego koloru), szybkość i jasność;
-  * *Oddaj żarówki do HA*: poza grą żarówki działają z HA;
+  * *Pełna synchronizacja*: profil na wszystkich urządzeniach Razer i żarówkach;
+  * *Profil tylko na żarówkach* (domyślnie);
+  * *Oddaj żarówki do HA*;
   * *Zostaw ostatni kolor z gry*.
+* **Zmiany koloru żarówek w efektach:** domyślnie 1 na sekundę, oszczędnie dla żarówek. Ustaw 3–5, jeśli chcesz płynniej.
 
 ## Na co dzień
 

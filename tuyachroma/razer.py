@@ -146,6 +146,48 @@ def _device_struct(name: str, data_type: type[_S]) -> type[_S]:
     ]})
 
 
+class AppInfo(_S):
+    _fields_ = [("name", ChromaString), ("app_id", u32), ("padding", u32)]
+
+
+class AppData(_S):
+    """Chroma SDK apps known to Synapse; app_id is the process id (PID)."""
+
+    _fields_ = [("app_count", u32), ("unused_name", ChromaString), ("current_app_id", u32),
+                ("padding", u32), ("apps", AppInfo * 50)]
+
+
+APP_DATA_FILE = r"Global\{D4E1A960-872F-4BF8-B09A-9E54F646D7CE}"
+
+
+def _string(cs: ChromaString) -> str:
+    chars = []
+    for c in cs.chars:
+        if c == 0:
+            break
+        chars.append(chr(c))
+    return "".join(chars)
+
+
+@dataclass
+class ChromaApps:
+    current_pid: int
+    apps: dict[int, str]  # pid -> exe name
+
+    @property
+    def current_name(self) -> str:
+        return self.apps.get(self.current_pid, "")
+
+
+def parse_app_data(raw: bytes) -> ChromaApps:
+    data = AppData.from_buffer_copy(raw[: C.sizeof(AppData)])
+    apps = {}
+    for app in data.apps[: min(50, data.app_count)]:
+        if app.app_id:
+            apps[app.app_id] = _string(app.name)
+    return ChromaApps(current_pid=data.current_app_id, apps=apps)
+
+
 Keyboard = _device_struct("Keyboard", KeyboardData)
 Mouse = _device_struct("Mouse", MouseData)
 Mousepad = _device_struct("Mousepad", MousepadData)
@@ -454,10 +496,12 @@ class ChromaReader:
         self._mutexes: list[int] = []
         self._maps: dict[str, tuple[int, int]] = {}
         self._events: dict[str, int] = {}
+        self._app_view: int | None = None
         try:
             self._acquire_mutexes()
             for name in devices:
                 self._open_device(DEVICES[name])
+            self._open_app_data()
         except Exception:
             self.close()
             raise
@@ -499,6 +543,24 @@ class ChromaReader:
         event = self._k32.CreateEventW(C.byref(self._sa), True, False, spec.event_name)
         if event:
             self._events[spec.name] = event
+
+    def _open_app_data(self) -> None:
+        mapping = self._k32.OpenFileMappingW(self.FILE_MAP_READ, False, APP_DATA_FILE)
+        if not mapping:
+            _LOGGER.debug("Chroma app list not available")
+            return
+        view = self._k32.MapViewOfFile(mapping, self.FILE_MAP_READ, 0, 0, C.sizeof(AppData))
+        if not view:
+            self._k32.CloseHandle(mapping)
+            return
+        self._maps["_apps"] = (mapping, view)
+        self._app_view = view
+
+    def read_apps(self) -> ChromaApps | None:
+        """Which Chroma app (PID) Synapse currently shows, or None if unknown."""
+        if self._app_view is None:
+            return None
+        return parse_app_data(C.string_at(self._app_view, C.sizeof(AppData)))
 
     def read(self, device: str) -> Frame | None:
         _, view = self._maps[device]

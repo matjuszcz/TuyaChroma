@@ -56,12 +56,13 @@ def make(monkeypatch, idle="effect"):
         return w
 
     service = engine.SyncService(reader_factory=world.reader, worker_factory=worker_factory,
-                                 service_check=lambda: world.alive)
+                                 service_check=lambda: world.alive, screen_factory=lambda: None)
     config = AppConfig(devices=[
         Device(id=i, name=i, local_key="k" * 16, ip="10.0.0.1", enabled=True) for i in ("a", "b")
     ])
     config.settings.idle = idle
-    config.settings.effect.period = 2
+    config.settings.active_profile = "Wave"
+    config.settings.bulb_effect_rate = 5
     return world, bulbs, workers, service, config
 
 

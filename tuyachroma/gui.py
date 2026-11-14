@@ -17,8 +17,10 @@ from typing import Any
 from . import __version__, winsys
 from .bulbs import probe_version
 from .config import IDLE_MODES, SOURCES, ZONES, AppConfig, Device, config_dir, save
-from .effects import EFFECTS
 from .engine import SyncService
+from .profiles import COLOR_MODES, DIRECTIONS, EFFECTS, Profile
+from .razer import DEVICES
+from .render import Renderer
 from .scan import scan
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,16 +34,28 @@ ZONE_LABELS = {
     "top": "Góra", "bottom": "Dół",
 }
 IDLE_LABELS = {
-    "effect": "Odtwarzaj efekt (jak profil w Synapse)",
+    "full": "Pełna synchronizacja: profil na wszystkich urządzeniach Razer i żarówkach (równo)",
+    "effect": "Profil tylko na żarówkach (Razer zostaje przy profilu z Synapse)",
     "restore": "Oddaj żarówki do HA (stan sprzed przejęcia)",
     "keep": "Zostaw ostatni kolor z gry",
 }
 EFFECT_LABELS = {
-    "wave": "Wave – fala tęczy przez żarówki",
-    "spectrum": "Spectrum – wszystkie zmieniają kolory razem",
-    "breathing": "Oddychanie – pulsujący kolor",
-    "static": "Stały kolor",
+    "wave": "Wave – fala tęczy",
+    "spectrum": "Spectrum Cycling – wszystko zmienia kolory razem",
+    "breathing": "Breathing – oddychanie",
+    "static": "Static – stały kolor",
+    "wheel": "Wheel – tęczowe koło",
+    "starlight": "Starlight – migające gwiazdy",
+    "fire": "Fire – ogień",
+    "reactive": "Reactive – podświetla naciśnięte klawisze",
+    "ripple": "Ripple – fala od naciśniętego klawisza",
+    "ambient": "Ambient Awareness – kolory z ekranu",
 }
+COLOR_MODE_LABELS = {"single": "Jeden kolor", "dual": "Dwa kolory", "random": "Losowe kolory"}
+DIRECTION_LABELS = {"right": "W prawo / zgodnie z zegarem", "left": "W lewo / przeciwnie",
+                    "down": "W dół", "up": "W górę"}
+assert set(EFFECT_LABELS) == set(EFFECTS) and set(COLOR_MODE_LABELS) == set(COLOR_MODES)
+assert set(DIRECTION_LABELS) == set(DIRECTIONS)
 METHOD_LABELS = {
     "colour": "Kolor (zalecany)",
     "music": "Music (szybszy, nie każda żarówka)",
@@ -157,6 +171,7 @@ class App:
         self.notebook.pack(fill="both", expand=True, padx=12, pady=(0, 6))
         self._build_bulbs_tab()
         self._build_account_tab()
+        self._build_profiles_tab()
         self._build_settings_tab()
 
         bottom = ttk.Frame(self.root, padding=(12, 0, 12, 8))
@@ -255,10 +270,7 @@ class App:
         self.set_minimized = tk.BooleanVar(value=s.start_minimized)
         self.set_idle = tk.StringVar(value=s.idle)
         self.set_fps = tk.IntVar(value=int(s.fps))
-        self.fx_effect = tk.StringVar(value=EFFECT_LABELS.get(s.effect.effect, EFFECT_LABELS["wave"]))
-        self.fx_color = s.effect.color
-        self.fx_period = tk.DoubleVar(value=s.effect.period)
-        self.fx_brightness = tk.DoubleVar(value=round(s.effect.brightness * 100))
+        self.set_bulb_rate = tk.DoubleVar(value=s.bulb_effect_rate)
         ttk.Checkbutton(tab, text="Uruchamiaj razem z Windows (przejmuj żarówki po włączeniu komputera)",
                         variable=self.set_autostart).pack(anchor="w")
         ttk.Checkbutton(tab, text="Startuj zminimalizowany do zasobnika (obok zegara)",
@@ -266,28 +278,23 @@ class App:
         ttk.Label(tab, text="Gdy Razer działa, ale żadna gra nie wysyła efektów Chroma:").pack(anchor="w")
         for mode in IDLE_MODES:
             ttk.Radiobutton(tab, text=IDLE_LABELS[mode], value=mode, variable=self.set_idle).pack(anchor="w", padx=12)
-        fx = ttk.Frame(tab)
-        fx.pack(anchor="w", padx=36, pady=(4, 0))
-        ttk.Label(fx, text="Efekt:").grid(row=0, column=0, sticky="e")
-        ttk.Combobox(fx, textvariable=self.fx_effect, state="readonly", width=42,
-                     values=[EFFECT_LABELS[e] for e in EFFECTS]).grid(row=0, column=1, columnspan=3, sticky="w", padx=6)
-        ttk.Label(fx, text="Kolor:").grid(row=1, column=0, sticky="e", pady=(6, 0))
-        self.fx_swatch = tk.Label(fx, width=4, background=self.fx_color, relief="groove")
-        self.fx_swatch.grid(row=1, column=1, sticky="w", padx=6, pady=(6, 0))
-        ttk.Button(fx, text="Wybierz…", command=self.pick_effect_color).grid(row=1, column=2, sticky="w", pady=(6, 0))
-        ttk.Label(fx, text="(oddychanie i stały kolor)", foreground="#666").grid(row=1, column=3, sticky="w", padx=6, pady=(6, 0))
-        ttk.Label(fx, text="Szybkość (s na cykl):").grid(row=2, column=0, sticky="e", pady=(6, 0))
-        ttk.Spinbox(fx, from_=2, to=60, increment=1, textvariable=self.fx_period, width=5).grid(row=2, column=1, sticky="w", padx=6, pady=(6, 0))
-        ttk.Label(fx, text="Jasność %:").grid(row=3, column=0, sticky="e", pady=(6, 0))
-        ttk.Scale(fx, from_=10, to=100, variable=self.fx_brightness, length=160).grid(row=3, column=1, columnspan=2, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(tab, foreground="#666", wraplength=self.px(780), justify="left",
+                  text="Efekt wybierasz w zakładce „Profile efektów”.").pack(anchor="w", padx=12, pady=(2, 0))
         row = ttk.Frame(tab)
         row.pack(anchor="w", pady=(12, 0))
-        ttk.Label(row, text="Odczyty Razer na sekundę:").pack(side="left")
+        ttk.Label(row, text="Zmiany koloru żarówek w efektach (na sekundę):").pack(side="left")
+        ttk.Spinbox(row, from_=0.5, to=5, increment=0.5, textvariable=self.set_bulb_rate, width=5).pack(side="left", padx=6)
+        ttk.Label(row, text="(1 = oszczędnie dla żarówek, 3–5 = płynniej)", foreground="#666").pack(side="left")
+        row = ttk.Frame(tab)
+        row.pack(anchor="w", pady=(8, 0))
+        ttk.Label(row, text="Odczyty Razer i klatki efektów na sekundę:").pack(side="left")
         ttk.Spinbox(row, from_=5, to=60, textvariable=self.set_fps, width=5).pack(side="left", padx=6)
         ttk.Label(
-            tab, foreground="#666", wraplength=780, justify="left",
-            text=("Efekty z profilu Synapse nie są dostępne dla innych programów, dlatego wybierz tu efekt "
-                  "podobny do ustawionego w Synapse. Kolory z gry zawsze mają pierwszeństwo.\n"
+            tab, foreground="#666", wraplength=self.px(780), justify="left",
+            text=("Kolory z gry zawsze mają pierwszeństwo. Efektów z profilu Synapse nie da się odczytać – "
+                  "w trybie pełnej synchronizacji program sam odtwarza wybrany profil na wszystkich "
+                  "urządzeniach Razer Chroma i żarówkach, a po zamknięciu programu urządzenia Razer "
+                  "wracają do profilu z Synapse.\n"
                   "Po wyłączeniu komputera, uśpieniu, zamknięciu Synapse lub programu albo wstrzymaniu "
                   "sterowania żarówki wracają do stanu sprzed przejęcia i dalej działają z Home Assistant."),
         ).pack(anchor="w", pady=(16, 0))
@@ -295,6 +302,210 @@ class App:
         row.pack(anchor="w", pady=(16, 0))
         ttk.Button(row, text="Zapisz ustawienia", command=self.save_settings).pack(side="left")
         ttk.Button(row, text="Otwórz folder z logami", command=self.open_logs).pack(side="left", padx=8)
+
+    def _build_profiles_tab(self) -> None:
+        tab = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab, text="Profile efektów")
+        left = ttk.Frame(tab)
+        left.pack(side="left", fill="y")
+        ttk.Label(left, text="Profile:").pack(anchor="w")
+        self.profile_list = tk.Listbox(left, height=14, width=24, exportselection=False)
+        self.profile_list.pack(fill="y", expand=True)
+        self.profile_list.bind("<<ListboxSelect>>", lambda _e: self._load_profile())
+        btns = ttk.Frame(left)
+        btns.pack(fill="x", pady=(6, 0))
+        ttk.Button(btns, text="Nowy", command=self.new_profile).pack(side="left")
+        ttk.Button(btns, text="Usuń", command=self.delete_profile).pack(side="left", padx=4)
+        ttk.Button(left, text="Ustaw jako aktywny", command=self.activate_profile).pack(fill="x", pady=(6, 0))
+
+        right = ttk.Frame(tab, padding=(14, 0, 0, 0))
+        right.pack(side="left", fill="both", expand=True)
+        self.pf_name = tk.StringVar()
+        self.pf_effect = tk.StringVar()
+        self.pf_mode = tk.StringVar()
+        self.pf_direction = tk.StringVar()
+        self.pf_speed = tk.IntVar(value=5)
+        self.pf_density = tk.IntVar(value=5)
+        self.pf_brightness = tk.DoubleVar(value=100)
+        self.pf_colors = ["#44d62c", "#0080ff"]
+        grid = ttk.Frame(right)
+        grid.pack(anchor="w")
+        rows = [
+            ("Nazwa:", ttk.Entry(grid, textvariable=self.pf_name, width=28)),
+            ("Efekt:", ttk.Combobox(grid, textvariable=self.pf_effect, state="readonly", width=40,
+                                    values=[EFFECT_LABELS[e] for e in EFFECTS])),
+            ("Kolory:", None),
+            ("Tryb kolorów:", ttk.Combobox(grid, textvariable=self.pf_mode, state="readonly", width=24,
+                                           values=list(COLOR_MODE_LABELS.values()))),
+            ("Kierunek:", ttk.Combobox(grid, textvariable=self.pf_direction, state="readonly", width=24,
+                                       values=list(DIRECTION_LABELS.values()))),
+            ("Prędkość (1–10):", ttk.Scale(grid, from_=1, to=10, variable=self.pf_speed, length=180)),
+            ("Gęstość gwiazd:", ttk.Scale(grid, from_=1, to=10, variable=self.pf_density, length=180)),
+            ("Jasność %:", ttk.Scale(grid, from_=5, to=100, variable=self.pf_brightness, length=180)),
+        ]
+        for r, (label, widget) in enumerate(rows):
+            ttk.Label(grid, text=label).grid(row=r, column=0, sticky="e", pady=3)
+            if widget is not None:
+                widget.grid(row=r, column=1, sticky="w", padx=6, pady=3)
+        colors = ttk.Frame(grid)
+        colors.grid(row=2, column=1, sticky="w", padx=6)
+        self.pf_swatches = []
+        for i in range(2):
+            sw = tk.Label(colors, width=4, background=self.pf_colors[i], relief="groove")
+            sw.pack(side="left")
+            ttk.Button(colors, text=f"Kolor {i + 1}…", command=lambda i=i: self.pick_profile_color(i)).pack(side="left", padx=(4, 10))
+            self.pf_swatches.append(sw)
+        ttk.Button(right, text="Zapisz profil", command=self.save_profile).pack(anchor="w", pady=(6, 8))
+        ttk.Label(right, text="Podgląd (klawiatura, mysz, podkładka, słuchawki, keypad, Chroma Link, żarówki):",
+                  foreground="#555").pack(anchor="w")
+        self.preview = tk.Canvas(right, width=self.px(470), height=self.px(150), background="#111",
+                                 highlightthickness=0)
+        self.preview.pack(anchor="w", pady=(4, 0))
+        self._preview_renderer = Renderer(self.config.settings.profile, seed=1)
+        self._preview_next_key = 0.0
+        self.refresh_profiles()
+        self.root.after(100, self._draw_preview)
+
+    # ------------------------------------------------------------- profiles
+
+    def refresh_profiles(self, select: str | None = None) -> None:
+        active = self.config.settings.active_profile
+        select = select or active
+        self.profile_list.delete(0, "end")
+        for i, p in enumerate(self.config.settings.profiles):
+            self.profile_list.insert("end", ("★ " if p.name == active else "   ") + p.name)
+            if p.name == select:
+                self.profile_list.selection_set(i)
+        self._load_profile()
+        self._update_tray_menu()
+
+    def _selected_profile(self) -> Profile | None:
+        sel = self.profile_list.curselection()
+        profiles = self.config.settings.profiles
+        return profiles[sel[0]] if sel and sel[0] < len(profiles) else None
+
+    def _load_profile(self) -> None:
+        p = self._selected_profile()
+        if p is None:
+            return
+        self.pf_name.set(p.name)
+        self.pf_effect.set(EFFECT_LABELS[p.effect])
+        self.pf_mode.set(COLOR_MODE_LABELS[p.color_mode])
+        self.pf_direction.set(DIRECTION_LABELS[p.direction])
+        self.pf_speed.set(p.speed)
+        self.pf_density.set(p.density)
+        self.pf_brightness.set(round(p.brightness * 100))
+        self.pf_colors = [p.color1, p.color2]
+        for sw, c in zip(self.pf_swatches, self.pf_colors):
+            sw.configure(background=c)
+        self._preview_renderer.set_profile(self._profile_from_form(p.name))
+
+    def _profile_from_form(self, fallback_name: str) -> Profile:
+        p = Profile(
+            name=self.pf_name.get().strip() or fallback_name,
+            effect=_label_to_key(EFFECT_LABELS, self.pf_effect.get()),
+            color1=self.pf_colors[0], color2=self.pf_colors[1],
+            color_mode=_label_to_key(COLOR_MODE_LABELS, self.pf_mode.get()),
+            speed=round(self.pf_speed.get()), direction=_label_to_key(DIRECTION_LABELS, self.pf_direction.get()),
+            density=round(self.pf_density.get()), brightness=round(self.pf_brightness.get()) / 100,
+        )
+        p.sanitize()
+        return p
+
+    def pick_profile_color(self, index: int) -> None:
+        _rgb, hex_color = colorchooser.askcolor(color=self.pf_colors[index], parent=self.root,
+                                                title=f"Kolor {index + 1}")
+        if hex_color:
+            self.pf_colors[index] = hex_color
+            self.pf_swatches[index].configure(background=hex_color)
+            self._preview_renderer.set_profile(self._profile_from_form("podgląd"))
+
+    def save_profile(self) -> None:
+        old = self._selected_profile()
+        if old is None:
+            return
+        new = self._profile_from_form(old.name)
+        names = [p.name for p in self.config.settings.profiles if p is not old]
+        if new.name in names:
+            messagebox.showinfo("TuyaChroma", f"Profil „{new.name}” już istnieje.")
+            return
+        settings = self.config.settings
+        if settings.active_profile == old.name:
+            settings.active_profile = new.name
+        settings.profiles[settings.profiles.index(old)] = new
+        self.refresh_profiles(select=new.name)
+        self.save_and_apply()
+        self.set_busy(f"Zapisano profil „{new.name}”.")
+
+    def new_profile(self) -> None:
+        names = {p.name for p in self.config.settings.profiles}
+        n = 1
+        while f"Mój profil {n}" in names:
+            n += 1
+        self.config.settings.profiles.append(Profile(name=f"Mój profil {n}"))
+        self.refresh_profiles(select=f"Mój profil {n}")
+        save(self.config)
+
+    def delete_profile(self) -> None:
+        p = self._selected_profile()
+        settings = self.config.settings
+        if p is None or len(settings.profiles) <= 1:
+            return
+        settings.profiles.remove(p)
+        if settings.active_profile == p.name:
+            settings.active_profile = settings.profiles[0].name
+            self.save_and_apply()
+        else:
+            save(self.config)
+        self.refresh_profiles()
+
+    def activate_profile(self, name: str | None = None) -> None:
+        p = self._selected_profile() if name is None else next(
+            (x for x in self.config.settings.profiles if x.name == name), None)
+        if p is None:
+            return
+        self.config.settings.active_profile = p.name
+        self.refresh_profiles(select=p.name)
+        self.save_and_apply()
+        self.set_busy(f"Aktywny profil: {p.name}")
+
+    def _draw_preview(self) -> None:
+        if self._quitting:
+            return
+        try:
+            self._render_preview()
+        except tk.TclError:
+            return
+        self.root.after(70, self._draw_preview)
+
+    def _render_preview(self) -> None:
+        r = self._preview_renderer
+        t = time.monotonic()
+        if r.profile.effect in ("reactive", "ripple") and t >= self._preview_next_key:
+            r.key_pressed(r._rng.randrange(6), r._rng.randrange(22), t)  # simulated typing
+            self._preview_next_key = t + 0.6
+        c = self.preview
+        c.delete("all")
+        u = self.px(14)
+
+        def grid(device, x0, y0, cell):
+            spec = DEVICES[device]
+            colors = r.device_frame(device, t)
+            for i, rgb in enumerate(colors):
+                x, y = i % spec.width, i // spec.width
+                c.create_rectangle(x0 + x * cell, y0 + y * cell, x0 + (x + 1) * cell - 2,
+                                   y0 + (y + 1) * cell - 2, fill="#%02x%02x%02x" % rgb, width=0)
+
+        grid("keyboard", self.px(8), self.px(8), u)
+        grid("mouse", self.px(330), self.px(8), self.px(10))
+        grid("keypad", self.px(410), self.px(8), self.px(11))
+        grid("mousepad", self.px(8), self.px(100), self.px(13))
+        grid("headset", self.px(215), self.px(100), self.px(13))
+        grid("chromalink", self.px(300), self.px(100), self.px(13))
+        bulbs = r.strip(max(1, len(self.config.enabled_devices) or 4), t)
+        for i, rgb in enumerate(bulbs):
+            x = self.px(8) + i * self.px(22)
+            c.create_oval(x, self.px(125), x + self.px(18), self.px(143), fill="#%02x%02x%02x" % rgb, width=0)
 
     # ---------------------------------------------------------------- bulbs
 
@@ -522,28 +733,16 @@ class App:
             s.fps = max(5, min(60, int(self.set_fps.get())))
         except (tk.TclError, ValueError):
             s.fps = 20
-        s.effect.effect = _label_to_key(EFFECT_LABELS, self.fx_effect.get())
-        if s.effect.effect not in EFFECTS:
-            s.effect.effect = "wave"
-        s.effect.color = self.fx_color
         try:
-            s.effect.period = max(2.0, min(60.0, float(self.fx_period.get())))
+            s.bulb_effect_rate = max(0.5, min(5.0, float(self.set_bulb_rate.get())))
         except (tk.TclError, ValueError):
-            s.effect.period = 8.0
-        s.effect.brightness = max(0.1, min(1.0, round(self.fx_brightness.get()) / 100))
+            s.bulb_effect_rate = 1.0
         try:
             winsys.set_autostart(s.autostart, s.start_minimized)
         except OSError as err:
             messagebox.showwarning("TuyaChroma", f"Nie udało się ustawić autostartu: {err}")
         self.save_and_apply()
         self.set_busy("Zapisano ustawienia.")
-
-    def pick_effect_color(self) -> None:
-        _rgb, hex_color = colorchooser.askcolor(color=self.fx_color, parent=self.root,
-                                                title="Kolor efektu")
-        if hex_color:
-            self.fx_color = hex_color
-            self.fx_swatch.configure(background=hex_color)
 
     def open_logs(self) -> None:
         path = config_dir()
@@ -613,6 +812,15 @@ class App:
                 lambda _i: "Wstrzymaj sterowanie" if self.config.settings.sync_enabled else "Włącz sterowanie",
                 lambda: self._queue.put(self.toggle_sync),
             ),
+            pystray.MenuItem("Profil efektu", pystray.Menu(lambda: [
+                pystray.MenuItem(
+                    p.name,
+                    lambda _i, _it, name=p.name: self._queue.put(lambda: self.activate_profile(name)),
+                    checked=lambda _i, name=p.name: self.config.settings.active_profile == name,
+                    radio=True,
+                )
+                for p in self.config.settings.profiles
+            ])),
             pystray.MenuItem("Zakończ", lambda: self._queue.put(self.quit)),
         )
 
