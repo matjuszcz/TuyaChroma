@@ -228,6 +228,7 @@ class SyncService:
         period = 1.0 / max(1.0, settings.fps)
         step = 1.0 / max(0.5, settings.bulb_effect_rate)
         last_fx: dict[int, float] = {}
+        warned_no_apps = False
         reader: ChromaReader | None = None
         last_check = time.monotonic()
 
@@ -268,6 +269,10 @@ class SyncService:
                     reader.close()
                     reader = None
                     continue
+                if apps is None and full_sync and not warned_no_apps:
+                    warned_no_apps = True
+                    _LOGGER.warning("Synapse's Chroma app list is not available: games can't be "
+                                    "told apart from our own effect in full sync mode")
                 self.game_active = is_game_active(frames, apps, self._own_pid, full_sync)
                 self.game_name = apps.current_name if (self.game_active and apps) else ""
                 profile_frames = strip = None
@@ -294,6 +299,9 @@ class SyncService:
             name = f" ({self.game_name})" if self.game_name else ""
             return f"efekt z gry aktywny{name}"
         if idle == "full":
+            player = self.player
+            if player is not None and "niedostępne" in player.output_status:
+                return player.output_status  # e.g. Chroma Apps disabled in Synapse
             return f"pełna synchronizacja – profil „{profile_name}”"
         if idle == "effect":
             return f"brak gry – profil „{profile_name}” na żarówkach"

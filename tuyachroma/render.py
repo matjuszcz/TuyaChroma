@@ -7,6 +7,7 @@ and for a virtual 1xN strip made of the Tuya bulbs.
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable
 import colorsys
 import math
@@ -50,6 +51,9 @@ class Renderer:
         self._rng = random.Random(seed)
         self._lock = threading.Lock()
         self._presses: list[tuple[int, int, float, RGB]] = []
+        # Filled by the keyboard hook thread without taking a lock: the hook must
+        # never wait, or typing would lag system-wide.
+        self._incoming: deque[tuple[int, int, float, RGB]] = deque(maxlen=64)
         self._state: dict[str, Any] = {}
         self._last_t: dict[str, float] = {}
         self.screen = screen  # (w, h) -> list[RGB] row-major, or None
@@ -63,13 +67,11 @@ class Renderer:
             self._state.clear()
             self._last_t.clear()
             self._presses.clear()
+            self._incoming.clear()
 
     def key_pressed(self, row: int, col: int, t: float | None = None) -> None:
         t = time.monotonic() if t is None else t
-        color = self._pick_color()
-        with self._lock:
-            self._presses.append((row, col, t, color))
-            self._presses = self._presses[-40:]
+        self._incoming.append((row, col, t, self._pick_color()))  # atomic, lock-free
 
     # ----------------------------------------------------------- outputs
 
@@ -194,7 +196,9 @@ class Renderer:
         return (255, round(140 + 115 * (v - 0.8) / 0.2), round(80 * (v - 0.8) / 0.2))
 
     def _recent_presses(self, t: float, life: float) -> list[tuple[int, int, float, RGB]]:
-        self._presses = [pr for pr in self._presses if t - pr[2] < life]
+        while self._incoming:
+            self._presses.append(self._incoming.popleft())
+        self._presses = [pr for pr in self._presses[-40:] if t - pr[2] < life]
         return self._presses
 
     def _fx_reactive(self, target, w, h, t, dt) -> list[RGB]:

@@ -109,3 +109,17 @@ def test_keymap_positions() -> None:
 def test_default_profiles_cover_all_effects() -> None:
     assert {p.effect for p in default_profiles()} == set(EFFECTS)
     assert len({p.name for p in default_profiles()}) == len(default_profiles())
+
+
+def test_key_press_never_waits_for_rendering() -> None:
+    import threading
+
+    rend = r("reactive", color1="#ff0000")
+    rend._lock.acquire()  # a frame is being rendered right now
+    try:
+        done = threading.Event()
+        threading.Thread(target=lambda: (rend.key_pressed(3, 2, t=1.0), done.set())).start()
+        assert done.wait(0.5)  # the keyboard hook returned immediately
+    finally:
+        rend._lock.release()
+    assert rend.device_frame("keyboard", 1.01)[3 * 22 + 2][0] > 240

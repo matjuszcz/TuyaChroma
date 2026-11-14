@@ -255,3 +255,37 @@ def test_live_profile_switch_without_restart(monkeypatch) -> None:
     finally:
         service.stop()
     assert not service.apply_profile(config)  # not running -> caller restarts instead
+
+
+def test_full_sync_reports_sdk_problem(monkeypatch) -> None:
+    class Reader:
+        def __init__(self, sources):
+            pass
+
+        def wait(self, ms):
+            time.sleep(0.005)
+
+        def read(self, src):
+            return Frame(src, 13, None, 1)
+
+        def read_apps(self):
+            return ChromaApps(current_pid=0, apps={})
+
+        def close(self):
+            pass
+
+    service = engine.SyncService(
+        reader_factory=Reader, worker_factory=lambda c: Recorder(c), service_check=lambda: True,
+        output_factory=lambda: NativeChroma(FakeDll(init_result=1062)), screen_factory=lambda: None,
+        own_pid=OWN,
+    )
+    config = AppConfig(devices=[Device(id="a", name="a", local_key="k", ip="1.1.1.1", enabled=True)])
+    config.settings.idle = "full"
+    service.start(config)
+    try:
+        deadline = time.time() + 2
+        while time.time() < deadline and "niedostępne" not in service.razer_status:
+            time.sleep(0.01)
+        assert "Chroma SDK niedostępne" in service.razer_status and "1062" in service.razer_status
+    finally:
+        service.stop()

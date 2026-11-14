@@ -150,6 +150,8 @@ Logi znajdziesz w *Ustawienia → Otwórz folder z logami* (`%APPDATA%\TuyaChrom
 | Problem | Rozwiązanie |
 |---|---|
 | „Razer niedostępny: Shared memory … not found” | Synapse nie działa albo moduł Chroma nie jest zainstalowany. Sprawdź, czy działa `RzSDKService`. |
+| Pełna synchronizacja: urządzenia Razer się nie zmieniają, status „Chroma SDK niedostępne” | W *Synapse → Chroma → Aplikacje Chroma* włącz obsługę aplikacji i sprawdź, czy TuyaChroma nie jest wyłączony. Upewnij się, że Synapse działa. |
+| Status ciągle pokazuje „efekt z gry aktywny (nazwa.exe)”, choć nie grasz | Inny program steruje Razer Chroma (np. Wallpaper Engine, wizualizer audio, inna aplikacja Chroma). Program traktuje go jak grę i przenosi jego kolory na żarówki. Zamknij go albo wyłącz w nim obsługę Chroma. |
 | Program czeka na grę, a gra ma efekty | Gra nie używa Razer Chroma albo ma je wyłączone w swoich ustawieniach. |
 | Żarówka: „nie znaleziono w sieci” | Sprawdź, czy Zapora Windows zezwala TuyaChroma na dostęp do sieci prywatnej (*Zapora Windows → Zezwalaj aplikacji…*). Kliknij *Szukaj w sieci*. Jeśli nie pomoże, wpisz IP ręcznie (znajdziesz je w routerze lub aplikacji Smart Life). Komputer i żarówki muszą być w tej samej sieci. |
 | Żarówka: błąd połączenia | Kliknij *Testuj*. Wyłącz lokalne integracje tej żarówki w HA. Po ponownym sparowaniu żarówki w aplikacji zaloguj się ponownie, bo zmienia się wtedy jej klucz. |

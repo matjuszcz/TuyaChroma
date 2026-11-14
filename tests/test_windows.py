@@ -90,3 +90,35 @@ def test_single_instance() -> None:
     first = winsys._instance_handle
     assert not winsys.acquire_single_instance()  # a second copy is detected
     winsys._instance_handle = first
+
+
+def test_native_chroma_without_synapse() -> None:
+    from tuyachroma.razer_out import NativeChroma
+
+    with pytest.raises(razer.RazerUnavailable):
+        NativeChroma()  # no Razer Synapse on the build machine
+
+
+def test_keyboard_hook_installs_and_stops() -> None:
+    import threading
+    import time
+
+    from tuyachroma.inputhook import KeyboardHook
+
+    pressed = []
+    hook = KeyboardHook(lambda r, c: pressed.append((r, c)))
+    hook.start()
+    assert hook._ready.wait(3)
+    # synthesize a key press (A) through the real input system
+    user32 = ctypes.WinDLL("user32")
+    user32.keybd_event(0x41, 0, 0, 0)
+    user32.keybd_event(0x41, 0, 2, 0)  # KEYEVENTF_KEYUP
+    deadline = time.time() + 2
+    while time.time() < deadline and not pressed:
+        time.sleep(0.02)
+    thread = hook._thread
+    hook.stop()
+    assert not thread.is_alive()
+    assert threading.active_count() >= 1
+    if pressed:  # hosted runners may not deliver synthetic input to LL hooks
+        assert pressed[0] == (3, 2)
