@@ -26,7 +26,8 @@ def set_autostart(enabled: bool, minimized: bool = True) -> None:
         return
     import winreg  # noqa: PLC0415
 
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+    # CreateKeyEx opens the key, or creates it if this profile has none yet.
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
         if enabled:
             winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, autostart_command(minimized))
         else:
