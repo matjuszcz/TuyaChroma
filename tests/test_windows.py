@@ -122,3 +122,13 @@ def test_keyboard_hook_installs_and_stops() -> None:
     assert threading.active_count() >= 1
     if pressed:  # hosted runners may not deliver synthetic input to LL hooks
         assert pressed[0] == (3, 2)
+
+
+def test_windows_device_list() -> None:
+    from tuyachroma import razer_devices
+
+    entries = razer_devices.list_present_devices()
+    assert len(entries) > 5  # every PC has many present devices
+    assert all(isinstance(i, str) and "\\" in i for i, _name in entries)
+    assert any(name for _i, name in entries)  # names are read
+    assert razer_devices.detect() == []  # no Razer hardware on the build machine

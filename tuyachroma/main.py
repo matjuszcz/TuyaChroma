@@ -84,16 +84,24 @@ def main(argv: list[str] | None = None) -> int:
             resume_timer.append(timer)
             timer.start()
 
+    app_holder: list = []
+
+    def on_devices_changed() -> None:
+        if app_holder:
+            app_holder[0].request_razer_refresh()
+
     winsys.start_system_event_listener(
         on_shutdown=lambda: service.stop(timeout=4),
         on_suspend=lambda: service.stop(timeout=4),
         on_resume=on_resume,
+        on_devices_changed=on_devices_changed,
     )
 
     from .gui import App  # noqa: PLC0415
 
     start_hidden = args.minimized and config.settings.start_minimized and bool(config.devices)
     app = App(config, service, start_hidden=start_hidden)
+    app_holder.append(app)
     try:
         app.mainloop()
     finally:

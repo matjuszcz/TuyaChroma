@@ -91,6 +91,9 @@ class AppConfig:
     settings: Settings = field(default_factory=Settings)
     username: str = ""
     user_code: str = ""
+    # Saved Tuya login (tokens) to refresh the device list without a new QR code.
+    # Stored encrypted with Windows DPAPI.
+    tuya_session: dict[str, Any] = field(default_factory=dict)
 
     @property
     def enabled_devices(self) -> list[Device]:
@@ -190,9 +193,16 @@ def load(path: Path | None = None) -> AppConfig:
     if settings.active_profile not in {p.name for p in settings.profiles}:
         settings.active_profile = settings.profiles[0].name
     settings.bulb_effect_rate = max(0.5, min(5.0, float(settings.bulb_effect_rate)))
+    session: dict[str, Any] = {}
+    if data.get("tuya_session"):
+        try:
+            session = json.loads(dpapi.unprotect(data["tuya_session"]))
+        except (OSError, ValueError, TypeError) as err:
+            _LOGGER.warning("Saved Tuya login unreadable: %s", err)
     return AppConfig(
         devices=devices, settings=settings,
         username=data.get("username", ""), user_code=data.get("user_code", ""),
+        tuya_session=session,
     )
 
 
@@ -209,6 +219,7 @@ def save(config: AppConfig, path: Path | None = None) -> None:
         "user_code": config.user_code,
         "settings": asdict(config.settings),
         "devices": devices,
+        "tuya_session": dpapi.protect(json.dumps(config.tuya_session)) if config.tuya_session else "",
     }
     # unique temp name: saves may happen from the UI and a worker thread at once
     tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")

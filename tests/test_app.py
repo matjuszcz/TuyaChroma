@@ -499,3 +499,98 @@ def test_gui_profiles_tab(tmp_path, monkeypatch) -> None:
     finally:
         app._quitting = True
         app.root.destroy()
+
+
+def test_fetch_with_session_refreshes_token() -> None:
+    from types import SimpleNamespace
+
+    from tuyachroma.cloud import fetch_with_session
+
+    session = {"user_code": "C", "terminal_id": "t", "endpoint": "e",
+               "token_info": {"t": 1, "uid": "u", "expire_time": 1, "access_token": "old",
+                              "refresh_token": "r"}}
+
+    class FakeManager:
+        def __init__(self, client_id, user_code, terminal_id, endpoint, token, listener):
+            self.listener = listener
+            self.user_homes = ["home"]
+            self.device_map = {"1": SimpleNamespace(
+                id="1", name="Lamp", local_key="k", category="dj", product_name="", sub=False,
+                function={"colour_data_v2": 1}, status_range={}, status={})}
+
+        def update_device_cache(self):
+            self.listener.update_token({"t": 2, "uid": "u", "expire_time": 7200,
+                                        "access_token": "new", "refresh_token": "r2"})
+
+    with patch("tuya_sharing.Manager", FakeManager):
+        devices, updated = fetch_with_session(session)
+    assert [d.name for d in devices] == ["Lamp"] and devices[0].rgb
+    assert updated["token_info"]["access_token"] == "new"  # saved for next time
+    assert session["token_info"]["access_token"] == "old"  # input not modified
+
+    class Expired(FakeManager):
+        def __init__(self, *a):
+            super().__init__(*a)
+            self.user_homes, self.device_map = [], {}
+
+        def update_device_cache(self):
+            pass
+
+    with patch("tuya_sharing.Manager", Expired), pytest.raises(TuyaCloudError, match="QR"):
+        fetch_with_session(session)
+    with pytest.raises(TuyaCloudError):
+        fetch_with_session({})
+
+
+def test_tuya_session_saved(tmp_path) -> None:
+    config = AppConfig(tuya_session={"user_code": "C", "token_info": {"access_token": "secret-token"}})
+    path = tmp_path / "c.json"
+    save(config, path)
+    assert load(path).tuya_session == config.tuya_session
+    if sys.platform == "win32":
+        assert "secret-token" not in path.read_text(encoding="utf-8")  # DPAPI-encrypted
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_gui_razer_devices_and_account_refresh(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import cloud, gui, razer_devices
+
+    detected = [razer_devices.RazerDevice("Razer BlackWidow V4", "keyboard", "USB", "0287")]
+    calls = []
+    monkeypatch.setattr(razer_devices, "detect", lambda: calls.append(1) or list(detected))
+    monkeypatch.setattr(gui, "scan", lambda _s: {"n1": {"id": "n1", "ip": "10.0.0.7", "version": "3.5"}})
+    monkeypatch.setattr(cloud, "fetch_with_session", lambda s: (
+        [CloudDevice("n1", "New strip", "k" * 16, "dd", "", rgb=True)], {**s, "refreshed": True}))
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    config = AppConfig(devices=[dev("old")], tuya_session={"user_code": "C"})
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+
+    def pump(cond, timeout=5):
+        end = time.time() + timeout
+        while time.time() < end and not cond():
+            app.root.update()
+            time.sleep(0.02)
+
+    try:
+        pump(lambda: app.razer_tree.get_children())
+        row = app.razer_tree.item(app.razer_tree.get_children()[0], "values")
+        assert row[0] == "Razer BlackWidow V4" and row[1] == "Klawiatura"
+        # a mouse gets plugged in: Windows fires several events, one refresh follows
+        detected.append(razer_devices.RazerDevice("Razer Basilisk V3", "mouse", "USB", "0099"))
+        n = len(calls)
+        for _ in range(5):
+            app.request_razer_refresh()
+        pump(lambda: len(app.razer_tree.get_children()) == 2)
+        assert len(app.razer_tree.get_children()) == 2 and len(calls) == n + 1
+
+        app.refresh_from_account()
+        pump(lambda: config.device("n1") is not None and config.device("n1").ip)
+        assert [d.id for d in config.devices] == ["n1"]  # removed "old", added the new strip
+        assert config.device("n1").ip == "10.0.0.7" and config.tuya_session.get("refreshed")
+        app.logout()
+        assert config.tuya_session == {} and load(cfgmod.default_path()).tuya_session == {}
+    finally:
+        service.stop()
+        app._quitting = True
+        app.root.destroy()

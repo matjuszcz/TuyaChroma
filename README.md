@@ -101,7 +101,7 @@ Zakładka **Konto Tuya**:
 
 Program pobierze urządzenia i przez około 10 s poszuka ich w sieci.
 
-> **Zapora Windows:** przy pierwszym wyszukiwaniu Windows zapyta, czy zezwolić programowi TuyaChroma na dostęp do sieci. Zaznacz **sieci prywatne** i kliknij *Zezwalaj*. Bez tego program nie znajdzie żarówek (nasłuchuje ich komunikatów w sieci lokalnej). Konto służy tylko do odczytania kluczy, a sterowanie odbywa się wyłącznie lokalnie. Program nie zapisuje tokenów logowania. Klucze żarówek są zapisywane zaszyfrowane (Windows DPAPI), w pliku `%APPDATA%\TuyaChroma\config.json`.
+> **Zapora Windows:** przy pierwszym wyszukiwaniu Windows zapyta, czy zezwolić programowi TuyaChroma na dostęp do sieci. Zaznacz **sieci prywatne** i kliknij *Zezwalaj*. Bez tego program nie znajdzie żarówek (nasłuchuje ich komunikatów w sieci lokalnej). Konto służy tylko do pobrania listy żarówek i kluczy, a sterowanie odbywa się wyłącznie lokalnie. Klucze żarówek i zapamiętane logowanie są zapisane zaszyfrowane (Windows DPAPI) w pliku `%APPDATA%\TuyaChroma\config.json`.
 
 > Program korzysta z tego samego logowania kodem QR co integracja Tuya w Home Assistant. Dlatego aplikacja Smart Life pokaże je jako autoryzację **„Home Assistant”**. Twoja dotychczasowa integracja Tuya w HA działa dalej.
 
@@ -118,7 +118,17 @@ Wskazówki:
 * **Chroma Link** to kanał, który wiele gier ustawia specjalnie dla oświetlenia otoczenia.
 * Dwie lampy można rozdzielić strefami, np. lewą na *Lewa strona*, a prawą na *Prawa strona*.
 
-### 3. Ustawienia
+### 3. Urządzenia Razer
+
+Zakładka **Urządzenia Razer** pokazuje urządzenia Razer wykryte w komputerze: przez USB, odbiornik bezprzewodowy albo Bluetooth. Przy każdym jest typ, sposób podłączenia i kategoria Chroma, do której trafiają efekty. Lista **odświeża się sama** po podłączeniu lub odłączeniu urządzenia, a do tego jest przycisk **Odśwież listę**. Uwagi przy urządzeniu mówią np., że Wolverine V2 Chroma nie jest obsługiwany przez Synapse.
+
+### 4. Aktualizacja listy żarówek
+
+Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life kliknij w zakładce *Żarówki* **Odśwież z konta**. Program pobierze aktualną listę świateł RGB i ich klucze, bez ponownego skanowania kodu QR, a potem znajdzie je w sieci. Ustawienia istniejących żarówek zostają. Żarówki usunięte z konta znikają z listy.
+
+Żeby to działało, program pamięta logowanie do konta Tuya. Jest ono zapisane **zaszyfrowane** (Windows DPAPI, odczyta je tylko Twoje konto Windows). *Konto Tuya → Wyloguj* usuwa zapisane logowanie. Żarówki i ich klucze zostają, a program dalej nimi steruje.
+
+### 5. Ustawienia
 
 * **Uruchamiaj razem z Windows** (domyślnie włączone): program startuje po zalogowaniu do Windows od razu w zasobniku, bez otwierania okna, i przejmuje wybrane żarówki, gdy gra wyśle efekt. Wpis autostartu znajdziesz też w *Menedżer zadań → Aplikacje autostartu* jako „TuyaChroma”.
 * **Startuj zminimalizowany do zasobnika**: przy autostarcie okno się nie otwiera. Wyłącz, jeśli wolisz widzieć okno po starcie.

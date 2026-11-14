@@ -104,17 +104,46 @@ class TuyaAccount:
         self.username = info.get("username")
         return info
 
-    def fetch_devices(self, info: dict[str, Any]) -> list[CloudDevice]:
-        from tuya_sharing import Manager  # noqa: PLC0415
+    def session(self, info: dict[str, Any]) -> dict[str, Any]:
+        """What is needed to list devices again later without a new QR code."""
+        return {
+            "user_code": self.user_code,
+            "terminal_id": info["terminal_id"],
+            "endpoint": info["endpoint"],
+            "token_info": {k: info[k] for k in ("t", "uid", "expire_time", "access_token", "refresh_token")},
+        }
 
+    def fetch_devices(self, info: dict[str, Any]) -> list[CloudDevice]:
+        devices, _session = fetch_with_session(self.session(info))
+        return devices
+
+
+def fetch_with_session(session: dict[str, Any]) -> tuple[list[CloudDevice], dict[str, Any]]:
+    """List the account's devices with a saved login (refreshes the token if needed).
+
+    Returns the devices and the (possibly updated) session to save.
+    Raises TuyaCloudError if the login expired and a new QR login is needed.
+    """
+    from tuya_sharing import Manager, SharingTokenListener  # noqa: PLC0415
+
+    updated = dict(session)
+
+    class Listener(SharingTokenListener):
+        def update_token(self, token_info: dict[str, Any]) -> None:
+            updated["token_info"] = dict(token_info)
+
+    try:
         manager = Manager(
-            TUYA_CLIENT_ID,
-            self.user_code,
-            info["terminal_id"],
-            info["endpoint"],
-            {k: info[k] for k in ("t", "uid", "expire_time", "access_token", "refresh_token")},
+            TUYA_CLIENT_ID, session["user_code"], session["terminal_id"], session["endpoint"],
+            session["token_info"], Listener(),
         )
         manager.update_device_cache()
-        devices = [d for c in manager.device_map.values() if (d := _device(c)) is not None]
-        devices.sort(key=lambda d: d.name.lower())
-        return devices
+    except KeyError as err:
+        raise TuyaCloudError("Brak zapisanego logowania") from err
+    except Exception as err:  # noqa: BLE001 - network / auth errors from the SDK
+        raise TuyaCloudError(f"Nie udało się pobrać urządzeń: {err}") from err
+    if not manager.user_homes and not manager.device_map:
+        raise TuyaCloudError("Logowanie wygasło – zaloguj się ponownie kodem QR")
+    devices = [d for c in manager.device_map.values() if (d := _device(c)) is not None]
+    devices.sort(key=lambda d: d.name.lower())
+    return devices, updated

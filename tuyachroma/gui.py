@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import colorchooser, messagebox, ttk
 from typing import Any
 
-from . import __version__, winsys
+from . import __version__, razer_devices, winsys
 from .bulbs import probe_version
 from .config import IDLE_MODES, SOURCES, ZONES, AppConfig, Device, config_dir, save
 from .engine import SyncService
@@ -171,6 +171,7 @@ class App:
         self.notebook.pack(fill="both", expand=True, padx=12, pady=(0, 6))
         self._build_bulbs_tab()
         self._build_account_tab()
+        self._build_razer_tab()
         self._build_profiles_tab()
         self._build_settings_tab()
 
@@ -188,6 +189,7 @@ class App:
         bar.pack(fill="x", pady=(0, 6))
         ttk.Label(bar, text="Światła RGB z Twojego konta. Zaznacz te, którymi ma sterować Razer (kolumna ✓).").pack(side="left")
         ttk.Button(bar, text="Szukaj w sieci", command=self.scan_lan).pack(side="right")
+        ttk.Button(bar, text="Odśwież z konta", command=self.refresh_from_account).pack(side="right", padx=6)
 
         cols = ("on", "name", "ip", "version", "source", "zone", "status")
         self.tree = ttk.Treeview(tab, columns=cols, show="headings", height=10, selectmode="browse")
@@ -247,7 +249,9 @@ class App:
                 "2. Wpisz kod poniżej i kliknij „Pokaż kod QR”.\n"
                 "3. Zeskanuj kod QR aplikacją (ikona skanera w prawym górnym rogu) i potwierdź logowanie.\n"
                 "Aplikacja pokaże to jako autoryzację „Home Assistant” – korzystamy z tego samego "
-                "mechanizmu logowania co Home Assistant."
+                "mechanizmu logowania co Home Assistant.\n"
+                "Logowanie jest zapamiętywane (zaszyfrowane dla Twojego konta Windows), żeby przycisk "
+                "„Odśwież z konta” w zakładce Żarówki działał bez ponownego skanowania kodu QR."
             ),
         ).pack(anchor="w", pady=(8, 12))
         row = ttk.Frame(tab)
@@ -256,6 +260,7 @@ class App:
         self.user_code_var = tk.StringVar(value=self.config.user_code)
         ttk.Entry(row, textvariable=self.user_code_var, width=18).pack(side="left", padx=6)
         ttk.Button(row, text="Pokaż kod QR", command=self.start_login).pack(side="left")
+        ttk.Button(row, text="Wyloguj (usuń zapisane logowanie)", command=self.logout).pack(side="left", padx=12)
         self.login_var = tk.StringVar()
         ttk.Label(tab, textvariable=self.login_var, foreground="#555").pack(anchor="w", pady=(10, 6))
         self.qr_label = ttk.Label(tab)
@@ -679,7 +684,106 @@ class App:
             if was_running:
                 self.service.start(self.config)
 
+    # -------------------------------------------------------- razer devices
+
+    def _build_razer_tab(self) -> None:
+        tab = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab, text="Urządzenia Razer")
+        bar = ttk.Frame(tab)
+        bar.pack(fill="x", pady=(0, 6))
+        self.razer_info = tk.StringVar(value="Wyszukuję urządzenia Razer…")
+        ttk.Label(bar, textvariable=self.razer_info).pack(side="left")
+        ttk.Button(bar, text="Odśwież listę", command=self.refresh_razer_devices).pack(side="right")
+        cols = ("name", "type", "conn", "sdk", "note")
+        self.razer_tree = ttk.Treeview(tab, columns=cols, show="headings", height=10)
+        for col, title, width in (("name", "Urządzenie", 250), ("type", "Typ", 115),
+                                  ("conn", "Połączenie", 120), ("sdk", "Efekty przez", 95),
+                                  ("note", "Uwagi", 290)):
+            self.razer_tree.heading(col, text=title)
+            self.razer_tree.column(col, width=self.px(width), anchor="w")
+        self.razer_tree.pack(fill="both", expand=True)
+        ttk.Label(
+            tab, foreground="#666", wraplength=self.px(820), justify="left",
+            text=("Lista odświeża się sama po podłączeniu lub odłączeniu urządzenia. Efekty trafiają do "
+                  "wszystkich urządzeń obsługiwanych przez Synapse – także tych, których nie widać na "
+                  "liście (np. urządzenia partnerów z Chroma Connect)."),
+        ).pack(anchor="w", pady=(6, 0))
+        self._razer_refresh_pending = False
+        self.razer_devices: list = []
+        self.refresh_razer_devices()
+
+    def request_razer_refresh(self) -> None:
+        """Thread-safe: called by Windows when a device is plugged in or removed."""
+        self._queue.put(self._schedule_razer_refresh)
+
+    def _schedule_razer_refresh(self) -> None:
+        if not self._razer_refresh_pending:  # a plug-in fires many events: wait for them
+            self._razer_refresh_pending = True
+            self.root.after(1500, self.refresh_razer_devices)
+
+    def refresh_razer_devices(self) -> None:
+        self._razer_refresh_pending = False
+        self.run_bg(razer_devices.detect, self._show_razer_devices,
+                    lambda err: self.razer_info.set(f"Błąd wykrywania: {err}"))
+
+    def _show_razer_devices(self, devices: list) -> None:
+        self.razer_devices = devices
+        for iid in self.razer_tree.get_children():
+            self.razer_tree.delete(iid)
+        for dev in devices:
+            self.razer_tree.insert("", "end", values=(
+                dev.name, razer_devices.CATEGORY_LABELS[dev.category], dev.connection,
+                SOURCE_LABELS.get(dev.sdk_category, dev.sdk_category), dev.note,
+            ))
+        stamp = time.strftime("%H:%M:%S")
+        if devices:
+            self.razer_info.set(f"Wykryto {len(devices)} urządzeń Razer (odświeżono {stamp}).")
+        else:
+            self.razer_info.set(f"Nie wykryto urządzeń Razer (odświeżono {stamp}).")
+
     # -------------------------------------------------------------- account
+
+    def refresh_from_account(self) -> None:
+        if not self.config.tuya_session:
+            messagebox.showinfo("TuyaChroma", "Zaloguj się w zakładce „Konto Tuya” (kod QR). "
+                                              "Później odświeżanie działa bez kodu QR.")
+            self.notebook.select(1)
+            return
+        self.set_busy("Pobieram listę urządzeń z konta Tuya…")
+
+        def fetch():
+            from .cloud import fetch_with_session  # noqa: PLC0415
+
+            return fetch_with_session(self.config.tuya_session)
+
+        def done(result) -> None:
+            devices, session = result
+            self.config.tuya_session = session  # token may have been refreshed
+            before = {d.id for d in self.config.devices}
+            new = self.config.merge_cloud(devices)
+            removed = len(before - {d.id for d in self.config.devices})
+            save(self.config)
+            self._update_account_label()
+            self.refresh_devices()
+            self.set_busy(f"Lista z konta: {len(self.config.devices)} świateł RGB "
+                          f"(nowe: {new}, usunięte: {removed}). Szukam ich w sieci…")
+            self.scan_lan()
+
+        def failed(err: Exception) -> None:
+            self.set_busy(f"{err}")
+            if "QR" in str(err) or "wygas" in str(err):
+                self.notebook.select(1)
+
+        self.run_bg(fetch, done, failed)
+
+    def logout(self) -> None:
+        self.config.tuya_session = {}
+        self.config.username = ""
+        save(self.config)
+        self._update_account_label()
+        self.login_var.set("Usunięto zapisane logowanie. Żarówki i ich klucze zostają – "
+                           "program dalej nimi steruje.")
+
 
     def _update_account_label(self) -> None:
         if self.config.username or self.config.devices:
@@ -739,6 +843,10 @@ class App:
             info, devices = result
             self.config.username = info.get("username") or ""
             self.config.user_code = account.user_code or ""
+            try:
+                self.config.tuya_session = account.session(info)
+            except (KeyError, AttributeError):
+                self.config.tuya_session = {}
             new = self.config.merge_cloud(devices)
             rgb = sum(1 for d in devices if d.rgb)
             self.login_var.set(

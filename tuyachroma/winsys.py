@@ -69,6 +69,10 @@ def acquire_single_instance() -> bool:
 WM_QUERYENDSESSION = 0x0011
 WM_ENDSESSION = 0x0016
 WM_POWERBROADCAST = 0x0218
+WM_DEVICECHANGE = 0x0219
+DBT_DEVNODES_CHANGED = 0x0007
+DBT_DEVICEARRIVAL = 0x8000
+DBT_DEVICEREMOVECOMPLETE = 0x8004
 PBT_APMSUSPEND = 0x0004
 PBT_APMRESUMESUSPEND = 0x0007
 PBT_APMRESUMEAUTOMATIC = 0x0012
@@ -78,6 +82,7 @@ def start_system_event_listener(
     on_shutdown: Callable[[], None],
     on_suspend: Callable[[], None],
     on_resume: Callable[[], None],
+    on_devices_changed: Callable[[], None] | None = None,
 ) -> threading.Thread | None:
     """Hidden window receiving shutdown/logoff and sleep/resume notifications."""
     if sys.platform != "win32":
@@ -119,6 +124,11 @@ def start_system_event_listener(
                 state["done"] = True
                 on_shutdown()
                 return 0
+            if msg == WM_DEVICECHANGE:
+                if on_devices_changed is not None and wparam in (
+                        DBT_DEVNODES_CHANGED, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE):
+                    on_devices_changed()  # a device was plugged in or removed
+                return 1
             if msg == WM_POWERBROADCAST:
                 if wparam == PBT_APMSUSPEND:
                     on_suspend()
