@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import sys
 import time
 from types import SimpleNamespace
@@ -208,7 +209,9 @@ def test_sync_service_waits_for_razer() -> None:
 # --------------------------------------------------------------------- GUI
 
 
+@functools.lru_cache(maxsize=1)
 def _tk_available() -> bool:
+    # checked once: on Windows, creating many Tk interpreters in one process can fail
     try:
         import tkinter
 
