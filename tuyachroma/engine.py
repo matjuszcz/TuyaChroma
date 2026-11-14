@@ -24,7 +24,8 @@ from .razer import (
     razer_service_running,
 )
 from .razer_out import NativeChroma
-from .render import Renderer
+from . import razer_devices
+from .render import KEYBOARD_AREAS, Renderer
 from .screen import ScreenSampler
 
 SERVICE_CHECK_INTERVAL = 3.0
@@ -34,15 +35,20 @@ DEVICE_EFFECTS = {"reactive", "ripple", "ambient"}  # bulbs sample a device zone
 _LOGGER = logging.getLogger(__name__)
 
 
-def bulb_color(cfg: BulbConfig, frame: Frame) -> RGB:
+def bulb_color(cfg: BulbConfig, frame: Frame, keyboard_area=None) -> RGB:
     """The color a bulb should show for a device frame."""
     assert frame.colors is not None
-    return zone_color(cfg, frame.colors)
+    return zone_color(cfg, frame.colors, keyboard_area)
 
 
-def zone_color(cfg: BulbConfig, colors: list[RGB]) -> RGB:
-    leds = [colors[i] for i in zone_indices(cfg.source, cfg.zone) if i < len(colors)]
+def zone_color(cfg: BulbConfig, colors: list[RGB], keyboard_area=None) -> RGB:
+    area = keyboard_area if cfg.source == "keyboard" else None
+    leds = [colors[i] for i in zone_indices(cfg.source, cfg.zone, area) if i < len(colors)]
     return adjust(reduce_colors(leds, cfg.mode), cfg.brightness, cfg.min_brightness)
+
+
+def detect_keyboard_layout() -> str:
+    return razer_devices.keyboard_layout(razer_devices.detect())
 
 
 def is_game_active(frames: dict[str, Frame | None], apps: ChromaApps | None,
@@ -66,13 +72,14 @@ def dispatch(
     strip: list[RGB] | None = None,
     profile: Profile | None = None,
     allow_effect: Callable[[Any], bool] = lambda _w: True,
+    keyboard_area=None,
 ) -> bool:
     """Send colors to the bulb workers. Returns True if a game color was used."""
     used_game = False
     for index, worker in enumerate(workers):
         frame = frames.get(worker.cfg.source)
         if game_active and frame is not None and frame.active:
-            worker.set_color(bulb_color(worker.cfg, frame))
+            worker.set_color(bulb_color(worker.cfg, frame, keyboard_area))
             used_game = True
         elif idle in ("full", "effect") and profile_frames is not None:
             if not allow_effect(worker):
@@ -81,7 +88,7 @@ def dispatch(
                     and (profile is None or profile.effect not in DEVICE_EFFECTS)):
                 rgb = adjust(strip[index], worker.cfg.brightness, worker.cfg.min_brightness)
             else:
-                rgb = zone_color(worker.cfg, profile_frames.get(worker.cfg.source, []))
+                rgb = zone_color(worker.cfg, profile_frames.get(worker.cfg.source, []), keyboard_area)
             worker.set_color(rgb)
         elif idle == "restore":
             worker.release()
@@ -100,7 +107,10 @@ class SyncService:
         keyhook_factory: Callable[[Callable[[int, int], None]], Any] = KeyboardHook,
         screen_factory: Callable[[], Any] = ScreenSampler,
         own_pid: int | None = None,
+        layout_detector: Callable[[], str] = detect_keyboard_layout,
     ) -> None:
+        self._layout_detector = layout_detector
+        self.keyboard_layout = "full"
         self._reader_factory = reader_factory
         self._worker_factory = worker_factory
         self._service_check = service_check
@@ -128,6 +138,7 @@ class SyncService:
             if self.running:
                 return
             s = config.settings
+            self.keyboard_layout = self._resolve_layout(s.keyboard_layout)
             self.workers = [self._worker_factory(d.bulb_config()) for d in config.enabled_devices]
             for w in self.workers:
                 w.start()
@@ -137,6 +148,7 @@ class SyncService:
                 profile = s.profile
                 screen = self._screen_factory() if profile.effect == "ambient" else None
                 renderer = Renderer(profile, screen=screen)
+                renderer.keyboard_area = KEYBOARD_AREAS[self.keyboard_layout]
                 self.player = EffectPlayer(
                     renderer, bulb_count=len(self.workers),
                     output_factory=self._output_factory if s.idle == "full" else None,
@@ -179,6 +191,17 @@ class SyncService:
             self.game_active = False
             self.game_name = ""
             _LOGGER.info("Sync stopped")
+
+    def _resolve_layout(self, setting: str) -> str:
+        if setting in KEYBOARD_AREAS:
+            return setting
+        try:
+            layout = self._layout_detector()
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Keyboard layout detection failed")
+            layout = "full"
+        _LOGGER.info("Keyboard layout: %s", layout)
+        return layout if layout in KEYBOARD_AREAS else "full"
 
     def apply_profile(self, config: AppConfig) -> bool:
         """Switch the playing profile without restarting (no flicker).
@@ -281,7 +304,7 @@ class SyncService:
                     profile_frames, strip = self.player.latest()
                 profile = self._profile or settings.profile
                 dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
-                         profile, allow_effect)
+                         profile, allow_effect, KEYBOARD_AREAS[self.keyboard_layout])
                 self.razer_status = self._status_text(idle, profile.name)
                 spent = time.monotonic() - started
                 if spent < period:

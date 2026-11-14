@@ -58,6 +58,14 @@ Zakładka **Profile efektów** to lista profili, podobna do profili w Synapse. K
 
 Jeśli starsze urządzenie albo starsza wersja Synapse nie obsługuje rozszerzonego układu, program sam przełącza się na podstawowy.
 
+**Klawiatury 60% i TKL** (np. **Huntsman Mini**): Chroma SDK ma jedną siatkę 6×22 dla wszystkich klawiatur, a mniejsze klawiatury mają klawisze tylko w jej części. Program rozpoznaje układ z wykrytej klawiatury (albo z ustawienia *Układ klawiatury Razer*). Dzięki temu:
+* efekty (np. cała tęcza w Wave) rozkładają się na klawiszach, które istnieją;
+* strefy żarówek (*lewa*, *środek*, *prawa*) dotyczą klawiszy Twojej klawiatury, a nie np. nieistniejącej klawiatury numerycznej.
+
+**Przykład zestawu:** Huntsman Mini (klawiatura, układ 60%), Basilisk V3 (mysz), Mouse Bungee V3 Chroma i Chroma ARGB Controller (taśmy i wentylatory, przez Chroma Link). Program wysyła efekt do wszystkich kategorii, więc obejmuje każde z tych urządzeń. Zastrzeżenia od strony Synapse:
+* Mouse Bungee V3 według zgłoszeń użytkowników czasem ignoruje efekty Chroma także w samym Synapse;
+* Chroma ARGB Controller u niektórych osób pokazuje w Chroma tylko 4 z 6 podłączonych wentylatorów.
+
 **Czego Chroma SDK nie obejmuje** (dotyczy też gier):
 * **Kontrolery sterowane osobną aplikacją**, np. *Razer Wolverine V2 Chroma*. Jego podświetlenie ustawia się w aplikacji „Razer Controller Setup for Xbox”, nie w Synapse, więc żaden program Chroma nim nie steruje.
 * **Lampy i taśmy Razer Aether** konfigurowane w aplikacji *Razer Gamer Room*. Nie jest pewne, czy po dodaniu ich do Synapse przyjmują efekty z Chroma SDK.

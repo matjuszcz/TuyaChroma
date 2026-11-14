@@ -22,6 +22,14 @@ from .razer import DEVICES, RGB
 BLACK: RGB = (0, 0, 0)
 KEYBOARD_W, KEYBOARD_H = 22, 6
 
+# All keyboards share Razer's 6x22 grid; smaller keyboards only have keys in part
+# of it. (first col, last col, first row, last row) of the area with keys:
+KEYBOARD_AREAS = {
+    "full": (0, 21, 0, 5),   # full size with numpad
+    "tkl": (1, 17, 0, 5),    # tenkeyless: up to the arrows / Pause column
+    "mini": (1, 14, 0, 5),   # 60%: e.g. Huntsman Mini (no F-row cluster, arrows, numpad)
+}
+
 
 def parse_hex(color: str, default: RGB = (68, 214, 44)) -> RGB:
     color = (color or "").strip().lstrip("#")
@@ -58,6 +66,7 @@ class Renderer:
         self._last_t: dict[str, float] = {}
         self.screen = screen  # (w, h) -> list[RGB] row-major, or None
         self.profile = profile
+        self.keyboard_area = KEYBOARD_AREAS["full"]
 
     # ------------------------------------------------------------ inputs
 
@@ -108,6 +117,16 @@ class Renderer:
             for x in range(w):
                 yield x, y
 
+    def _area(self, target: str, w: int, h: int) -> tuple[float, float, float, float]:
+        """(x0, width, y0, height) of the part of the grid that has LEDs."""
+        if target in ("keyboard", "keyboard_ext"):
+            c0, c1, r0, r1 = self.keyboard_area
+            off = 1 if target == "keyboard_ext" else 0  # keys sit inside the 8x24 grid
+            if target == "keyboard_ext" and self.keyboard_area == KEYBOARD_AREAS["full"]:
+                return 0, w, 0, h  # full size: underglow spans the whole extended grid
+            return c0 + off, c1 - c0 + 1, r0 + off, r1 - r0 + 1
+        return 0, w, 0, h
+
     # ----------------------------------------------------------- effects
 
     def _fx_static(self, target, w, h, t, dt) -> list[RGB]:
@@ -131,18 +150,21 @@ class Renderer:
     def _fx_wave(self, target, w, h, t, dt) -> list[RGB]:
         p = self.profile
         shift = t / p.period
+        x0, aw, y0, ah = self._area(target, w, h)
         out = []
         for x, y in self._positions(w, h):
-            # x / w (not x / (w-1)): the LEDs share one rainbow without the first
-            # and the last one getting the same color (2 bulbs = opposite colors)
-            pos = {"right": x / w, "left": (w - 1 - x) / w,
-                   "down": y / h, "up": (h - 1 - y) / h}[p.direction]
+            # (x - x0) / width (not / (width-1)): the LEDs share one rainbow without
+            # the first and the last one getting the same color (2 bulbs = opposite)
+            u, v = (x - x0) / aw, (y - y0) / ah
+            pos = {"right": u, "left": (aw - 1) / aw - u,
+                   "down": v, "up": (ah - 1) / ah - v}[p.direction]
             out.append(hsv(shift - pos))
         return out
 
     def _fx_wheel(self, target, w, h, t, dt) -> list[RGB]:
         p = self.profile
-        cx, cy = (w - 1) / 2, (h - 1) / 2
+        x0, aw, y0, ah = self._area(target, w, h)
+        cx, cy = x0 + (aw - 1) / 2, y0 + (ah - 1) / 2
         sign = -1 if p.direction in ("right", "down") else 1
         out = []
         for x, y in self._positions(w, h):
@@ -157,9 +179,10 @@ class Renderer:
         n = w * h
         expected = p.density * 0.06 * n * dt / max(0.2, life / 2)
         spawn = int(expected) + (1 if self._rng.random() < expected % 1 else 0)
-        for _ in range(spawn):
-            i = self._rng.randrange(n)
-            if i not in stars:
+        x0, aw, y0, ah = self._area(target, w, h)
+        for _ in range(spawn):  # only where there are LEDs (e.g. the keys of a 60% keyboard)
+            i = (int(y0) + self._rng.randrange(int(ah))) * w + int(x0) + self._rng.randrange(int(aw))
+            if 0 <= i < n and i not in stars:
                 stars[i] = (t, self._pick_color())
         out = [BLACK] * n
         for i, (born, color) in list(stars.items()):
@@ -224,7 +247,8 @@ class Renderer:
 
     def _fx_ripple(self, target, w, h, t, dt) -> list[RGB]:
         life = self.profile.period * 0.6
-        speed = KEYBOARD_W / max(0.3, life)  # keys per second
+        _x0, kw, _y0, _kh = self._area("keyboard", KEYBOARD_W, KEYBOARD_H)
+        speed = kw / max(0.3, life)  # keys per second, across the keys that exist
         presses = self._recent_presses(t, life)
         out = [BLACK] * (w * h)
         for row, col, t0, color in presses:

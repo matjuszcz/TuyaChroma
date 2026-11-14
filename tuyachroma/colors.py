@@ -9,27 +9,36 @@ from .razer import DEVICES, RGB
 ZONES = ("all", "left", "center", "right", "top", "bottom")
 
 
-def zone_indices(device: str, zone: str | int | list[int]) -> list[int]:
-    """LED indices (row-major) of a named zone, a single LED, or a list of LEDs."""
+def zone_indices(device: str, zone: str | int | list[int],
+                 area: tuple[int, int, int, int] | None = None) -> list[int]:
+    """LED indices (row-major) of a named zone, a single LED, or a list of LEDs.
+
+    ``area`` = (first col, last col, first row, last row) with LEDs, e.g. the
+    keys of a 60% keyboard inside the 6x22 grid; zones are split within it.
+    """
     spec = DEVICES[device]
     if isinstance(zone, int):
         zone = [zone]
     if isinstance(zone, list):
         return [i for i in zone if 0 <= i < spec.count] or list(range(spec.count))
-    w, h = spec.width, spec.height
-    third = max(1, w // 3)
-    columns = {
-        "left": range(0, third),
-        "center": range(third, w - third) if w > 2 else range(w),
-        "right": range(w - third, w),
+    w = spec.width
+    c0, c1, r0, r1 = area if area is not None else (0, w - 1, 0, spec.height - 1)
+    cols = list(range(c0, c1 + 1))
+    rows = list(range(r0, r1 + 1))
+    n, h = len(cols), len(rows)
+    third = max(1, n // 3)
+    pick_cols = {
+        "left": cols[:third],
+        "center": cols[third:n - third] if n > 2 else cols,
+        "right": cols[n - third:],
     }
-    if zone in columns:
-        return [y * w + x for y in range(h) for x in columns[zone]]
+    if zone in pick_cols:
+        return [y * w + x for y in rows for x in pick_cols[zone]]
     if zone == "top":
-        return list(range(0, max(1, h // 2) * w))
+        return [y * w + x for y in rows[:max(1, h // 2)] for x in cols]
     if zone == "bottom":
-        return list(range((h // 2) * w, h * w)) if h > 1 else list(range(w))
-    return list(range(spec.count))
+        return [y * w + x for y in (rows[h // 2:] if h > 1 else rows) for x in cols]
+    return [y * w + x for y in rows for x in cols]
 
 
 def reduce_colors(colors: list[RGB], mode: str = "vivid") -> RGB:

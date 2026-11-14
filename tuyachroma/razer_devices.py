@@ -215,3 +215,15 @@ def detect() -> list[RazerDevice]:
     except Exception:  # noqa: BLE001 - never break the app because of device listing
         _LOGGER.exception("Razer device detection failed")
         return []
+
+
+def keyboard_layout(devices: list[RazerDevice]) -> str:
+    """Guess the keyboard layout from the connected keyboards' names."""
+    names = [d.name.lower() for d in devices if d.category == "keyboard"]
+    if not names:
+        return "full"
+    if all("mini" in n for n in names):
+        return "mini"
+    if all(("mini" in n) or ("tkl" in n) or ("tenkeyless" in n) for n in names):
+        return "tkl"
+    return "full"

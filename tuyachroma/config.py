@@ -74,6 +74,7 @@ class Settings:
     profiles: list[Profile] = field(default_factory=default_profiles)
     active_profile: str = "Wave"
     bulb_effect_rate: float = 1.0  # bulb color changes per second while a profile plays
+    keyboard_layout: str = "auto"  # auto (detected) | full | tkl | mini (60%)
     fps: float = 20
     sync_enabled: bool = True
 
@@ -193,6 +194,8 @@ def load(path: Path | None = None) -> AppConfig:
     if settings.active_profile not in {p.name for p in settings.profiles}:
         settings.active_profile = settings.profiles[0].name
     settings.bulb_effect_rate = max(0.5, min(5.0, float(settings.bulb_effect_rate)))
+    if settings.keyboard_layout not in ("auto", "full", "tkl", "mini"):
+        settings.keyboard_layout = "auto"
     session: dict[str, Any] = {}
     if data.get("tuya_session"):
         try:

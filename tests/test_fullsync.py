@@ -320,3 +320,28 @@ def test_extended_layouts_and_fallback() -> None:
     assert [c[1] for c in kb_calls] == [9, 2, 2]  # tried extended once, then basic 6x22
     pad_calls = [c for c in old.calls if c[0] == "CreateMousepadEffect"]
     assert [c[1] for c in pad_calls] == [6, 2, 2] and len(pad_calls[-1][2]) == 15
+
+
+def test_service_uses_detected_layout() -> None:
+    from tuyachroma.render import KEYBOARD_AREAS
+
+    service = engine.SyncService(
+        reader_factory=lambda s: (_ for _ in ()).throw(RazerUnavailable("x")),
+        worker_factory=lambda c: Recorder(c), service_check=lambda: True,
+        output_factory=lambda: NativeChroma(FakeDll()), screen_factory=lambda: None,
+        own_pid=OWN, layout_detector=lambda: "mini",
+    )
+    config = AppConfig(devices=[Device(id="a", name="a", local_key="k", ip="1.1.1.1", enabled=True)])
+    config.settings.idle = "full"
+    service.start(config)
+    try:
+        assert service.keyboard_layout == "mini"
+        assert service.player.renderer.keyboard_area == KEYBOARD_AREAS["mini"]
+    finally:
+        service.stop()
+    config.settings.keyboard_layout = "full"  # manual setting wins over detection
+    service.start(config)
+    try:
+        assert service.keyboard_layout == "full"
+    finally:
+        service.stop()

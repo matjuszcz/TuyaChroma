@@ -20,7 +20,7 @@ from .config import IDLE_MODES, SOURCES, ZONES, AppConfig, Device, config_dir, s
 from .engine import SyncService
 from .profiles import COLOR_MODES, DIRECTIONS, EFFECTS, Profile
 from .razer import DEVICES
-from .render import Renderer
+from .render import KEYBOARD_AREAS, Renderer
 from .scan import scan
 
 _LOGGER = logging.getLogger(__name__)
@@ -56,6 +56,12 @@ DIRECTION_LABELS = {"right": "W prawo / zgodnie z zegarem", "left": "W lewo / pr
                     "down": "W dół", "up": "W górę"}
 assert set(EFFECT_LABELS) == set(EFFECTS) and set(COLOR_MODE_LABELS) == set(COLOR_MODES)
 assert set(DIRECTION_LABELS) == set(DIRECTIONS)
+LAYOUT_LABELS = {
+    "auto": "Automatycznie (z wykrytej klawiatury)",
+    "full": "Pełnowymiarowa (z klawiaturą numeryczną)",
+    "tkl": "Bez klawiatury numerycznej (TKL)",
+    "mini": "60% (np. Huntsman Mini)",
+}
 METHOD_LABELS = {
     "colour": "Kolor (zalecany)",
     "music": "Music (szybszy, nie każda żarówka)",
@@ -276,6 +282,7 @@ class App:
         self.set_idle = tk.StringVar(value=s.idle)
         self.set_fps = tk.IntVar(value=int(s.fps))
         self.set_bulb_rate = tk.DoubleVar(value=s.bulb_effect_rate)
+        self.set_layout = tk.StringVar(value=LAYOUT_LABELS[s.keyboard_layout])
         ttk.Checkbutton(tab, text="Uruchamiaj razem z Windows (przejmuj żarówki po włączeniu komputera)",
                         variable=self.set_autostart).pack(anchor="w")
         ttk.Checkbutton(tab, text="Startuj zminimalizowany do zasobnika (obok zegara)",
@@ -290,6 +297,11 @@ class App:
         ttk.Label(row, text="Zmiany koloru żarówek w efektach (na sekundę):").pack(side="left")
         ttk.Spinbox(row, from_=0.5, to=5, increment=0.5, textvariable=self.set_bulb_rate, width=5).pack(side="left", padx=6)
         ttk.Label(row, text="(1 = oszczędnie dla żarówek, 3–5 = płynniej)", foreground="#666").pack(side="left")
+        row = ttk.Frame(tab)
+        row.pack(anchor="w", pady=(8, 0))
+        ttk.Label(row, text="Układ klawiatury Razer:").pack(side="left")
+        ttk.Combobox(row, textvariable=self.set_layout, state="readonly", width=40,
+                     values=list(LAYOUT_LABELS.values())).pack(side="left", padx=6)
         row = ttk.Frame(tab)
         row.pack(anchor="w", pady=(8, 0))
         ttk.Label(row, text="Odczyty Razer i klatki efektów na sekundę:").pack(side="left")
@@ -491,6 +503,12 @@ class App:
         if not self.service.apply_profile(self.config):
             self.save_and_apply()
 
+    def _preview_layout(self) -> str:
+        setting = self.config.settings.keyboard_layout
+        if setting in KEYBOARD_AREAS:
+            return setting
+        return razer_devices.keyboard_layout(getattr(self, "razer_devices", []) or [])
+
     def _preview_visible(self) -> bool:
         try:
             return (self.root.state() == "normal"
@@ -525,13 +543,20 @@ class App:
         c.delete("all")
         u = self.px(14)
 
+        r.keyboard_area = KEYBOARD_AREAS[self._preview_layout()]
+        kc0, kc1, kr0, kr1 = r.keyboard_area
+
         def grid(device, x0, y0, cell):
             spec = DEVICES[device]
             colors = r.device_frame(device, t)
             for i, rgb in enumerate(colors):
                 x, y = i % spec.width, i // spec.width
+                if device == "keyboard" and not (kc0 <= x <= kc1 and kr0 <= y <= kr1):
+                    fill = "#222222"  # no key there on this keyboard
+                else:
+                    fill = "#%02x%02x%02x" % rgb
                 c.create_rectangle(x0 + x * cell, y0 + y * cell, x0 + (x + 1) * cell - 2,
-                                   y0 + (y + 1) * cell - 2, fill="#%02x%02x%02x" % rgb, width=0)
+                                   y0 + (y + 1) * cell - 2, fill=fill, width=0)
 
         grid("keyboard", self.px(8), self.px(8), u)
         grid("mouse", self.px(330), self.px(8), self.px(10))
@@ -737,7 +762,9 @@ class App:
             ))
         stamp = time.strftime("%H:%M:%S")
         if devices:
-            self.razer_info.set(f"Wykryto {len(devices)} urządzeń Razer (odświeżono {stamp}).")
+            layout = LAYOUT_LABELS[razer_devices.keyboard_layout(devices)].split(" (")[0]
+            self.razer_info.set(f"Wykryto {len(devices)} urządzeń Razer, układ klawiatury: "
+                                f"{layout} (odświeżono {stamp}).")
         else:
             self.razer_info.set(f"Nie wykryto urządzeń Razer (odświeżono {stamp}).")
 
@@ -877,6 +904,9 @@ class App:
             s.bulb_effect_rate = max(0.5, min(5.0, float(self.set_bulb_rate.get())))
         except (tk.TclError, ValueError):
             s.bulb_effect_rate = 1.0
+        s.keyboard_layout = _label_to_key(LAYOUT_LABELS, self.set_layout.get())
+        if s.keyboard_layout not in LAYOUT_LABELS:
+            s.keyboard_layout = "auto"
         try:
             winsys.set_autostart(s.autostart, s.start_minimized)
         except OSError as err:
