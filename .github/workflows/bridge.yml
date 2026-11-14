@@ -41,6 +41,8 @@ jobs:
         run: |
           ./dist/TuyaChromaBridge.exe --version
           ./dist/TuyaChromaBridge.exe init -c "$env:RUNNER_TEMP/config.json"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          ./dist/TuyaChromaBridge.exe test -c "$env:RUNNER_TEMP/config.json"
           if (!(Test-Path "$env:RUNNER_TEMP/config.json")) { exit 1 }
 
       - name: Package
