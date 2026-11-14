@@ -14,6 +14,16 @@ from .razer import RGB
 
 EFFECTS = ["wave", "spectrum", "breathing", "static"]
 
+# Ambient effects run for hours: change bulbs at most once per second (bulbs
+# fade between colors themselves) instead of several times per second, to
+# spare bulbs that save their last color to flash memory.
+MAX_EFFECT_STEP = 1.0
+
+
+def effect_step(fx: EffectSettings) -> float:
+    """Seconds between color changes for this effect."""
+    return min(MAX_EFFECT_STEP, max(0.25, fx.period / 8))
+
 
 @dataclass
 class EffectSettings:
@@ -41,6 +51,7 @@ def _hsv(h: float, s: float = 1.0, v: float = 1.0) -> RGB:
 def effect_color(fx: EffectSettings, t: float, index: int = 0, count: int = 1) -> RGB:
     """Color of bulb ``index`` (of ``count``) at time ``t`` seconds."""
     period = max(0.5, fx.period)
+    t = math.floor(t / effect_step(fx)) * effect_step(fx)  # quantize: fewer bulb updates
     phase = (t / period) % 1.0
     level = max(0.0, min(1.0, fx.brightness))
     if fx.effect == "wave":

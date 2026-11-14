@@ -24,6 +24,8 @@ Gra z Razer Chroma ─► Razer Synapse (Chroma SDK) ─► TuyaChroma ─► ż
   * **Spectrum**: wszystkie żarówki razem zmieniają kolory;
   * **Oddychanie**: pulsujący kolor;
   * **Stały kolor**.
+
+  Efekt zmienia kolor najwyżej raz na sekundę (żarówki same płynnie przechodzą między kolorami). Działa godzinami, więc nie zasypuje żarówek poleceniami. Kolory z gier są aktualizowane kilka razy na sekundę.
 * **Przejęcie i oddanie:**
   * przy przejęciu program zapamiętuje aktualny stan żarówki (ustawiony np. w HA albo w aplikacji Tuya);
   * gdy wyłączysz lub uśpisz komputer, zamkniesz Synapse lub program albo wstrzymasz sterowanie, żarówka **wraca do zapamiętanego stanu** i dalej działa z HA.

@@ -30,3 +30,11 @@ def test_breathing_and_static() -> None:
     st = EffectSettings(effect="static", color="#0080ff", brightness=0.5)
     assert effect_color(st, 123) == (0, 64, 128)
     assert parse_hex("bad") == (68, 214, 44)
+
+
+def test_effect_changes_at_most_once_per_second() -> None:
+    fx = EffectSettings(effect="wave", period=8)
+    # 20 frames per second for 10 s -> about 10 different colors, not 200
+    colors = [effect_color(fx, i / 20, 0, 1) for i in range(200)]
+    changes = sum(1 for a, b in zip(colors, colors[1:]) if a != b)
+    assert changes <= 10
