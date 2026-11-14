@@ -11,9 +11,9 @@ Na co dzień żarówki dalej działają z **Home Assistant** (albo z aplikacji T
 ## Jak to działa
 
 ```
-Gra z Razer Chroma ─► Razer Synapse (Chroma SDK) ─► TuyaChroma ─► żarówki Tuya (sieć lokalna)
-                                                                  ▲
-                         Home Assistant (poza grą) ───────────────┘
+Komputer włączony:  gra z Chroma ─► Razer Synapse ─► TuyaChroma ─► żarówki Tuya (sieć lokalna)
+                    (bez gry: TuyaChroma odtwarza efekt, np. Wave)
+Komputer wyłączony: Home Assistant / aplikacja Tuya ───────────────► żarówki Tuya
 ```
 
 * **Logowanie kontem Tuya / Smart Life jako zwykły użytkownik.** Wpisujesz kod użytkownika z aplikacji i skanujesz kod QR. Program pobiera listę żarówek i ich klucze lokalne, a potem sam znajduje je w sieci (adres IP i wersję protokołu).
@@ -93,13 +93,19 @@ Wskazówki:
 
 * Program działa w **zasobniku** (zielona ikona obok zegara). Zarówno minimalizacja (**_**), jak i zamknięcie okna (**X**) chowają je do zasobnika. Program działa wtedy dalej. Całkowicie zamyka go dopiero *Zakończ* w menu ikony.
 * Jeśli ikona jest ukryta pod strzałką **^** obok zegara, przeciągnij ją na pasek, żeby była zawsze widoczna.
-* Menu ikony: **Otwórz**, **Wstrzymaj sterowanie** (żarówki od razu wracają do HA) albo **Włącz sterowanie**, **Zakończ**.
+* Menu ikony: **Otwórz**, **Wstrzymaj sterowanie** (żarówki od razu wracają do HA; wstrzymanie trwa do zamknięcia programu lub restartu komputera) albo **Włącz sterowanie**, **Zakończ**.
+* Fala (*Wave*) przechodzi przez żarówki w kolejności z listy w zakładce *Żarówki*.
 * Kropka w oknie programu: 🟢 efekt z gry jest aktywny, 🔵 Razer działa (odtwarzany jest efekt albo program czeka na grę), 🟡 wymaga uwagi (np. Synapse nie działa albo nie wybrano żarówek).
 
 ## Uwagi o Home Assistant
 
-* **Oficjalna integracja Tuya** (przez chmurę) działa bez zmian. W czasie efektu z gry polecenia z HA zostaną po chwili nadpisane kolorami z gry. Po grze żarówka wraca do stanu sprzed przejęcia.
-* Jeśli masz **automatyzacje HA**, które często zmieniają te żarówki, w czasie gry będą się „przepychać” z programem. Możesz np. wyłączać je, gdy komputer jest włączony.
+* **Oficjalna integracja Tuya** (przez chmurę) działa bez zmian.
+* **Gdy program steruje żarówką**, polecenia z HA lub aplikacji Tuya zostaną po chwili nadpisane. Dotyczy to też wyłączenia żarówki: efekt włączy ją z powrotem.
+  * Przy *Odtwarzaj efekt* (domyślnie) program steruje wybranymi żarówkami **przez cały czas, gdy działa Razer**.
+  * Przy *Oddaj żarówki do HA* steruje nimi tylko w trakcie gry.
+* Żeby sterować światłem z HA przy włączonym komputerze, użyj **Wstrzymaj sterowanie** w menu ikony. Żarówki od razu wracają do stanu sprzed przejęcia.
+* **Automatyzacje HA**, które często zmieniają te żarówki, będą się „przepychać” z programem, gdy ten nimi steruje. Możesz je np. wyłączać, gdy komputer jest włączony.
+* Jeśli program zostanie przerwany nagle (zanik prądu, zabicie procesu), żarówki zostaną na ostatnim kolorze, ale HA może nimi normalnie sterować.
 * **Lokalne integracje** (LocalTuya, Tuya Local) mogą w czasie działania programu pokazywać żarówkę jako niedostępną. Część żarówek Tuya przyjmuje tylko jedno połączenie lokalne naraz.
 
 ## Rozwiązywanie problemów

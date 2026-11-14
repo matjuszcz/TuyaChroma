@@ -154,6 +154,9 @@ def load(path: Path | None = None) -> AppConfig:
     if isinstance(fx, dict):
         fx_names = {f.name for f in fields(EffectSettings)}
         settings.effect = EffectSettings(**{k: v for k, v in fx.items() if k in fx_names})
+    elif "settings" in data and settings.idle == "restore":
+        # Saved by 1.0, where "restore" was only the default: use the new default.
+        settings.idle = "effect"
     if settings.idle not in IDLE_MODES:
         settings.idle = "effect"
     if settings.effect.effect not in EFFECTS:

@@ -63,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = load()
+    # "Pause" is temporary: every start (e.g. turning the PC on) takes the bulbs over again.
+    config.settings.sync_enabled = True
     service = SyncService()
     try:
         winsys.set_autostart(config.settings.autostart, config.settings.start_minimized)

@@ -462,3 +462,49 @@ def test_effect_settings_roundtrip(tmp_path) -> None:
     config.settings.effect.period = 3.0
     save(config, tmp_path / "c.json")
     assert load(tmp_path / "c.json").settings.effect == config.settings.effect
+
+
+def test_migrates_v1_0_default_idle(tmp_path) -> None:
+    import json
+
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"settings": {"idle": "restore", "fps": 20}, "devices": []}))
+    assert load(path).settings.idle == "effect"  # 1.0 default -> new default
+    path.write_text(json.dumps({"settings": {"idle": "restore", "effect": {"effect": "static"}},
+                                "devices": []}))
+    loaded = load(path)
+    assert loaded.settings.idle == "restore" and loaded.settings.effect.effect == "static"
+
+
+def test_pause_is_not_kept_after_restart(tmp_path, monkeypatch) -> None:
+    from tuyachroma import main as mainmod
+
+    config = AppConfig(devices=[dev("a", enabled=True)])
+    config.settings.sync_enabled = False  # user paused, then restarted the PC
+    started = {}
+
+    class FakeService:
+        def start(self, cfg):
+            started["sync_enabled"] = cfg.settings.sync_enabled
+
+        def stop(self, timeout=5):
+            pass
+
+    class FakeApp:
+        def __init__(self, *a, **kw):
+            pass
+
+        def mainloop(self):
+            pass
+
+    monkeypatch.setattr(mainmod, "load", lambda: config)
+    monkeypatch.setattr(mainmod, "SyncService", FakeService)
+    monkeypatch.setattr(mainmod, "setup_logging", lambda v: None)
+    monkeypatch.setattr(mainmod.winsys, "acquire_single_instance", lambda: True)
+    monkeypatch.setattr(mainmod.winsys, "set_autostart", lambda *a: None)
+    monkeypatch.setattr(mainmod.winsys, "start_system_event_listener", lambda **kw: None)
+    import tuyachroma.gui as guimod
+
+    monkeypatch.setattr(guimod, "App", FakeApp)
+    assert mainmod.main(["--minimized"]) == 0
+    assert started == {"sync_enabled": True}
