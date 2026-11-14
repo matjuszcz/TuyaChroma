@@ -18,9 +18,10 @@ OWN = os.getpid()
 
 
 class FakeDll:
-    def __init__(self, init_result=0):
+    def __init__(self, init_result=0, reject_extended=False):
         self.calls = []
         self.init_result = init_result
+        self.reject_extended = reject_extended
 
     def Init(self):
         self.calls.append(("Init",))
@@ -35,7 +36,8 @@ class FakeDll:
             def create(effect_type, param, effect_id):
                 buf = param._obj  # ctypes byref -> the array
                 self.calls.append((name, effect_type, list(buf), effect_id))
-                return 0
+                extended = (name, effect_type) in {("CreateKeyboardEffect", 9), ("CreateMousepadEffect", 6)}
+                return 50 if (extended and self.reject_extended) else 0  # 50 = NOT_SUPPORTED
             return create
         raise AttributeError(name)
 
@@ -94,6 +96,10 @@ def test_player_pauses_for_games() -> None:
         sent = [c[0] for c in dll.calls if c[0].startswith("Create")]
         assert {"CreateKeyboardEffect", "CreateMouseEffect", "CreateMousepadEffect",
                 "CreateHeadsetEffect", "CreateKeypadEffect", "CreateChromaLinkEffect"} <= set(sent)
+        kb = next(c for c in dll.calls if c[0] == "CreateKeyboardEffect")
+        assert kb[1] == 9 and len(kb[2]) == 8 * 24 + 6 * 22  # extended keyboard layout
+        pad = next(c for c in dll.calls if c[0] == "CreateMousepadEffect")
+        assert pad[1] == 6 and len(pad[2]) == 20  # extended mousepad layout
         frames, strip = player.latest()
         assert set(frames) == set(DEVICES) and len(strip) == 3
         player.paused = True
@@ -289,3 +295,28 @@ def test_full_sync_reports_sdk_problem(monkeypatch) -> None:
         assert "Chroma SDK niedostępne" in service.razer_status and "1062" in service.razer_status
     finally:
         service.stop()
+
+
+def test_extended_layouts_and_fallback() -> None:
+    from tuyachroma.razer_out import KEY_OVERRIDE
+
+    frames = {d: [(255, 0, 0)] * DEVICES[d].count for d in DEVICES}
+    frames["keyboard_ext"] = [(0, 0, 255)] * (8 * 24)
+    frames["mousepad_ext"] = [(0, 255, 0)] * 20
+    dll = FakeDll()
+    out = NativeChroma(dll)
+    out.send_frames(frames)
+    kb = next(c for c in dll.calls if c[0] == "CreateKeyboardEffect")
+    assert kb[1] == 9
+    assert kb[2][:192] == [0xFF0000] * 192  # extra LEDs: blue (COLORREF BGR)
+    assert kb[2][192:] == [0x0000FF | KEY_OVERRIDE] * 132  # keys: red, override flag
+    assert len([c for c in dll.calls if c[0].startswith("Create")]) == 6  # all categories
+
+    old = FakeDll(reject_extended=True)  # older device / Synapse
+    out = NativeChroma(old)
+    out.send_frames(frames)
+    out.send_frames(frames)
+    kb_calls = [c for c in old.calls if c[0] == "CreateKeyboardEffect"]
+    assert [c[1] for c in kb_calls] == [9, 2, 2]  # tried extended once, then basic 6x22
+    pad_calls = [c for c in old.calls if c[0] == "CreateMousepadEffect"]
+    assert [c[1] for c in pad_calls] == [6, 2, 2] and len(pad_calls[-1][2]) == 15

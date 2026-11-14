@@ -206,8 +206,10 @@ class Renderer:
         presses = self._recent_presses(t, life)
         n = w * h
         out = [BLACK] * n
-        if target == "keyboard":
+        if target in ("keyboard", "keyboard_ext"):
+            off = 1 if target == "keyboard_ext" else 0  # 6x22 keys sit inside the 8x24 grid
             for row, col, t0, color in presses:
+                row, col = row + off, col + off
                 if 0 <= row < h and 0 <= col < w:
                     i = row * w + col
                     f = 1 - (t - t0) / life
@@ -229,8 +231,9 @@ class Renderer:
             age = t - t0
             radius = age * speed
             fade = 1 - age / life
-            if target == "keyboard":
-                cx, cy, sx, sy = col, row, 1.0, 1.0
+            if target in ("keyboard", "keyboard_ext"):
+                off = 1 if target == "keyboard_ext" else 0
+                cx, cy, sx, sy = col + off, row + off, 1.0, 1.0
             else:  # start from the device's center, scaled to keyboard size
                 cx, cy = (w - 1) / 2, (h - 1) / 2
                 sx, sy = KEYBOARD_W / max(1, w), KEYBOARD_H / max(1, h) if h > 1 else 1.0

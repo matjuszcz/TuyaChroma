@@ -45,18 +45,23 @@ Zakładka **Profile efektów** to lista profili, podobna do profili w Synapse. K
 | **Ripple** | fala rozchodząca się od naciśniętego klawisza |
 | **Ambient Awareness** | kolory z ekranu na urządzeniach i żarówkach |
 
-**Obsługiwane urządzenia Razer:** program wysyła efekt do wszystkich sześciu kategorii Chroma SDK, w pełnej siatce diod każdej z nich:
+**Obsługiwane urządzenia Razer:** program wysyła efekt do wszystkich sześciu kategorii Chroma SDK, w pełnej siatce diod każdej z nich. Dla nowszych urządzeń używa rozszerzonych układów:
 
 | Kategoria | Siatka | Przykłady |
 |---|---|---|
-| klawiatura | 6×22 | klawiatury, laptopy Blade |
-| mysz | 9×7 | myszy |
-| podkładka | 15 | podkładki, stacje (Base Station, Mouse Dock) |
-| słuchawki | 5 | słuchawki Kraken, BlackShark |
+| klawiatura | 6×22, rozszerzona **8×24** (dodatkowe diody: podświetlenie spodu, boki) | BlackWidow, Huntsman, Ornata, DeathStalker, Cynosa, laptopy Blade |
+| mysz | 9×7 (z bocznymi paskami) | DeathAdder, Basilisk, Viper, Naga, Cobra |
+| podkładka | 15, rozszerzona **20** stref | Firefly, Goliathus Chroma, Strider Chroma, stacje: Base Station, Mouse Dock |
+| słuchawki | 5 | Kraken (V3/V4, Kitty), BlackShark, Barracuda z Chroma |
 | keypad | 4×5 | Tartarus, Orbweaver |
-| Chroma Link | 5 | kontrolery, głośniki, inne urządzenia Chroma i urządzenia partnerów |
+| Chroma Link | 5 | głośniki Nommo i Leviathan, mikrofony Seiren z Chroma, Core X Chroma, stacje Thunderbolt Chroma, kontroler ARGB, podstawki i podkładki chłodzące Chroma, urządzenia partnerów z Chroma Connect |
 
-Synapse sam przypisuje każde urządzenie do jednej z tych kategorii, więc efekt trafia na cały Twój sprzęt Chroma, również na kontroler.
+Jeśli starsze urządzenie albo starsza wersja Synapse nie obsługuje rozszerzonego układu, program sam przełącza się na podstawowy.
+
+**Czego Chroma SDK nie obejmuje** (dotyczy też gier):
+* **Kontrolery sterowane osobną aplikacją**, np. *Razer Wolverine V2 Chroma*. Jego podświetlenie ustawia się w aplikacji „Razer Controller Setup for Xbox”, nie w Synapse, więc żaden program Chroma nim nie steruje.
+* **Lampy i taśmy Razer Aether** konfigurowane w aplikacji *Razer Gamer Room*. Nie jest pewne, czy po dodaniu ich do Synapse przyjmują efekty z Chroma SDK.
+* **Ogólna zasada:** jeśli urządzenie zmienia się razem z profilami w Synapse i reaguje na gry z Chroma, zadziała też z TuyaChroma.
 
 **Uwagi:**
 * *Reactive* i *Ripple* odczytują, **który** klawisz naciśnięto (tylko jego pozycję, nic nie jest zapisywane), tak samo jak Synapse. Program robi to tylko przy tych dwóch efektach.

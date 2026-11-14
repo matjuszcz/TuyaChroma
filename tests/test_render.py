@@ -123,3 +123,10 @@ def test_key_press_never_waits_for_rendering() -> None:
     finally:
         rend._lock.release()
     assert rend.device_frame("keyboard", 1.01)[3 * 22 + 2][0] > 240
+
+
+def test_extended_keyboard_key_alignment() -> None:
+    rend = r("reactive", color1="#ff0000")
+    rend.key_pressed(3, 2, t=1.0)
+    ext = rend.frame("keyboard_ext", 24, 8, 1.01)
+    assert ext[4 * 24 + 3][0] > 240  # key (3,2) sits at (4,3) in the 8x24 grid

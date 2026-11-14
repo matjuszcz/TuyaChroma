@@ -9,6 +9,7 @@ import threading
 import time
 
 from .razer import DEVICES, RGB, RazerUnavailable
+from .razer_out import EXTENDED_SIZES
 from .render import Renderer
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,7 +69,10 @@ class EffectPlayer(threading.Thread):
                             self.output_status = "urządzenia Razer: steruje gra"
                         else:
                             self.output_status = "urządzenia Razer: efekt z programu"
-                            self._send(frames)
+                            out = dict(frames)
+                            for name, (w, h) in EXTENDED_SIZES.items():
+                                out[name] = self.renderer.frame(name, w, h, t)
+                            self._send(out)
                 spent = time.monotonic() - started
                 self._stop_event.wait(max(0.0, self._period - spent))
         finally:
@@ -78,8 +82,7 @@ class EffectPlayer(threading.Thread):
 
     def _send(self, frames: dict[str, list[RGB]]) -> None:
         try:
-            for device, colors in frames.items():
-                self._output.set_frame(device, colors)
+            self._output.send_frames(frames)
         except Exception as err:  # noqa: BLE001 - SDK/service went away
             _LOGGER.warning("Chroma SDK error: %s", err)
             try:
