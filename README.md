@@ -6,6 +6,8 @@ Niestandardowa integracja Home Assistant, która:
 * **łączy się z Razer Chroma** (klawiatura, mysz, podkładka, słuchawki, keypad, Chroma Link) przez Chroma SDK REST API z Razer Synapse,
 * **synchronizuje kolory** – np. klawiatura i mysz Razer przyjmują kolor i jasność żarówki Tuya (lub dowolnego innego światła w HA).
 
+> 🎮 **Efekty Razer Chroma z gier na żarówkach Tuya** (bez Home Assistant): zobacz program na Windows **[TuyaChroma Bridge](bridge/README.md)**.
+
 ## Instalacja
 
 **HACS:** HACS → Integracje → ⋮ → *Niestandardowe repozytoria* → `https://github.com/matjuszcz/TuyaChroma` (kategoria *Integracja*) → zainstaluj *Tuya Chroma* → restart HA.
