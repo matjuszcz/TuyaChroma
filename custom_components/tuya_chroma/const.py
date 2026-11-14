@@ -31,6 +31,8 @@ CONF_DEVICE_ID: Final = "device_id"
 CONF_LOCAL_KEY: Final = "local_key"
 CONF_PROTOCOL_VERSION: Final = "protocol_version"
 PROTOCOL_VERSIONS: Final = ["3.1", "3.2", "3.3", "3.4", "3.5"]
+# Order in which versions are tried when the version is unknown.
+PROBE_VERSIONS: Final = ["3.3", "3.4", "3.5", "3.1"]
 DEFAULT_PROTOCOL_VERSION: Final = "3.3"
 TUYA_SCAN_INTERVAL: Final = timedelta(seconds=15)
 TUYA_MIN_KELVIN: Final = 2700

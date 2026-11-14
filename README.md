@@ -23,20 +23,37 @@ Integrację możesz dodać wiele razy: każdą żarówkę Tuya i każdy komputer
 
 ## Konfiguracja Tuya
 
-Potrzebujesz: adres IP urządzenia, **Device ID**, **Local Key** i wersję protokołu (najczęściej 3.3, nowsze urządzenia 3.4/3.5).
+Są trzy sposoby dodania świateł Tuya:
 
-1. Załóż darmowe konto deweloperskie na [iot.tuya.com](https://iot.tuya.com), utwórz projekt Cloud i podłącz do niego konto z aplikacji Smart Life / Tuya (instrukcja: [tinytuya – Setup Wizard](https://github.com/jasonacox/tinytuya#setup-wizard---getting-local-keys)).
-2. Na komputerze w tej samej sieci:
-   ```bash
-   pip install tinytuya
-   python -m tinytuya wizard   # pobiera Device ID i Local Key
-   python -m tinytuya scan     # pokazuje IP i wersję protokołu
-   ```
-3. Wpisz te dane w kreatorze. Nadaj urządzeniu w routerze stały adres IP.
+### 1. Z konta Tuya / Smart Life (zalecane)
 
-> Local Key zmienia się po ponownym sparowaniu urządzenia w aplikacji – wtedy usuń i dodaj urządzenie w HA na nowo.
+Nie potrzebujesz konta deweloperskiego ani żadnych kluczy.
 
-Obsługiwane są typowe żarówki/taśmy Tuya (DP 1–9 lub 20–28; RGB, RGB+CCT, CCT, ściemniane). Typ jest wykrywany automatycznie.
+1. *Dodaj integrację → Tuya Chroma → **Światła Tuya z mojego konta Tuya / Smart Life***.
+2. W aplikacji **Smart Life** (lub **Tuya Smart**): *Ja → ⚙ Ustawienia → Konto i bezpieczeństwo → Kod użytkownika* (*User Code*). Wpisz go w HA.
+3. HA pokaże **kod QR**. Zeskanuj go aplikacją (ikona skanera w prawym górnym rogu ekranu głównego), potwierdź logowanie i kliknij **Zatwierdź**.
+4. Integracja pobiera z konta listę urządzeń z ich **Local Key** i przez ~8 s nasłuchuje w sieci lokalnej, żeby znaleźć ich **adresy IP i wersję protokołu**.
+5. Zaznacz urządzenia (światła są zaznaczone domyślnie). Jeśli któregoś nie znaleziono w sieci, HA poprosi o jego IP.
+6. Każde urządzenie staje się osobną pozycją integracji. Wersja protokołu jest sprawdzana automatycznie.
+
+Konto Tuya jest używane **tylko podczas dodawania**. Integracja nie zapisuje tokenów logowania, a światła są potem sterowane wyłącznie lokalnie. Logowanie korzysta z tej samej autoryzacji „Home Assistant” co wbudowana integracja Tuya.
+
+### 2. Z wbudowanej integracji Tuya
+
+Jeśli masz już skonfigurowaną oficjalną integrację **Tuya** w HA, w menu pojawi się **Światła Tuya z wbudowanej integracji Tuya**. Klucze zostaną wtedy wzięte z niej, bez ponownego logowania.
+
+### 3. Ręcznie
+
+Wybierz **Oświetlenie Tuya (dane wpisane ręcznie)** i podaj IP, Device ID, Local Key i wersję protokołu (najczęściej 3.3; nowsze urządzenia 3.4/3.5). Dane możesz uzyskać np. przez `python -m tinytuya wizard` (wymaga konta na [iot.tuya.com](https://iot.tuya.com)).
+
+### Uwagi
+
+* Nadaj urządzeniom Tuya **stałe adresy IP** w routerze.
+* Wykrywanie w sieci wymaga, by HA odbierał rozgłoszenia UDP (porty 6666, 6667, 7000). Działa to w Home Assistant OS i w Dockerze z `network_mode: host`. W innych przypadkach wpisz IP ręcznie.
+* **Zmiana IP, Local Key lub wersji protokołu**: *pozycja urządzenia → Konfiguruj*. Local Key zmienia się po ponownym sparowaniu urządzenia w aplikacji. Najprościej wtedy usunąć urządzenie i zaimportować je z konta jeszcze raz.
+* Urządzenia Zigbee/BLE podłączone przez bramkę nie mają własnego klucza lokalnego i nie są obsługiwane.
+
+Obsługiwane są typowe żarówki i taśmy Tuya (DP 1–9 lub 20–28; RGB, RGB+CCT, CCT, ściemniane). Typ jest wykrywany automatycznie.
 
 ## Konfiguracja Razer Chroma
 
@@ -120,6 +137,8 @@ logger:
 
 | Problem | Rozwiązanie |
 |---|---|
+| Tuya: logowanie kodem QR się nie udaje | Kod użytkownika musi pochodzić z tej samej aplikacji, którą skanujesz. Kod QR jest jednorazowy: po błędzie HA pokazuje nowy. |
+| Tuya: urządzenie bez IP po imporcie | HA nie odbiera rozgłoszeń UDP albo urządzenie jest offline. Wpisz IP ręcznie. |
 | Tuya: „Nie można się połączyć" | Sprawdź IP, Local Key i wersję protokołu (spróbuj 3.3/3.4/3.5). Zamknij aplikację Smart Life na telefonie – niektóre urządzenia obsługują tylko jedno połączenie lokalne naraz. |
 | Razer: „Nie można się połączyć" | Czy Synapse działa i Chroma Apps jest włączone? Czy `curl http://IP:54235/razer/chromasdk` działa z innego komputera? |
 | Razer: sesja się tworzy, ale kolory się nie zmieniają | Port sesji jest spoza zakresu 54235–54240: w logach debug znajdziesz `Chroma session created: http://IP:PORT/...` – dodaj ten port do portproxy. |
@@ -127,8 +146,8 @@ logger:
 ## Rozwój
 
 ```bash
-pip install pytest-homeassistant-custom-component tinytuya==1.21.1
+pip install -r requirements_test.txt
 pytest
 ```
 
-Testy symulują Chroma SDK oraz żarówkę Tuya.
+Testy symulują Chroma SDK, żarówkę Tuya, logowanie do konta Tuya i rozgłoszenia UDP.

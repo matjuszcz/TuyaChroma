@@ -5,8 +5,10 @@
         "title": "Tuya Chroma",
         "description": "What do you want to add?",
         "menu_options": {
-          "chroma": "Razer Chroma (PC with Synapse)",
-          "tuya": "Tuya light (local network)"
+          "tuya_core": "Tuya lights from the built-in Tuya integration",
+          "tuya_cloud": "Tuya lights from my Tuya / Smart Life account",
+          "tuya": "Tuya light (enter data manually)",
+          "chroma": "Razer Chroma (PC with Synapse)"
         }
       },
       "chroma": {
@@ -29,15 +31,41 @@
           "local_key": "Local key",
           "protocol_version": "Protocol version"
         }
+      },
+      "tuya_cloud": {
+        "title": "Tuya / Smart Life account",
+        "description": "Open the Smart Life (or Tuya Smart) app → Me → ⚙ Settings → Account and Security → User Code, and enter that code here. The account is only used to read device keys; lights are then controlled locally.\n\n{error}",
+        "data": {
+          "user_code": "User code"
+        }
+      },
+      "tuya_scan": {
+        "title": "Scan the QR code",
+        "description": "Scan this QR code with the Smart Life / Tuya Smart app (scan icon in the top right corner), confirm the login in the app, then press Submit.\n\n{error}"
+      },
+      "tuya_pick": {
+        "title": "Choose devices",
+        "description": "Found {total} devices on the account, {found} of them on the local network. Lights are preselected.",
+        "data": {
+          "devices": "Devices"
+        }
+      },
+      "tuya_ips": {
+        "title": "IP addresses",
+        "description": "{count} selected device(s) were not found on the local network (they may be offline, or Home Assistant does not receive UDP broadcasts). Enter their IP addresses, or leave empty to skip."
       }
     },
     "error": {
       "cannot_connect": "Failed to connect",
       "unknown": "Unexpected error",
-      "no_devices": "Select at least one device"
+      "no_devices": "Select at least one device",
+      "login_error": "Login failed"
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "Device is already configured",
+      "no_new_devices": "No new devices: all devices of this account are already added",
+      "no_devices_added": "No device was added (missing IP addresses)",
+      "login_error": "Login failed"
     }
   },
   "options": {
@@ -46,7 +74,10 @@
         "title": "Sync",
         "description": "Optionally pick a light whose color and brightness these lights will mirror (e.g. a Tuya bulb for Razer Chroma).",
         "data": {
-          "follow_entity": "Mirror light"
+          "follow_entity": "Mirror light",
+          "host": "IP address",
+          "local_key": "Local key",
+          "protocol_version": "Protocol version"
         }
       }
     }

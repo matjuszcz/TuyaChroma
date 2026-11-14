@@ -162,3 +162,15 @@ class TuyaLight:
         if colour_temp is not None and dpset.get("colourtemp"):
             dps[dpset["colourtemp"]] = self._from_fraction(colour_temp, use_min=False)
         _check(self._dev.set_multiple_values(dps))
+
+
+def probe_version(device_id: str, host: str, local_key: str, versions: list[str]) -> str | None:
+    """Return the first protocol version that works with the device, or None."""
+    for version in versions:
+        try:
+            TuyaLight(device_id, host, local_key, version).get_state()
+        except TuyaError as err:
+            _LOGGER.debug("Tuya %s @ %s v%s failed: %s", device_id, host, version, err)
+            continue
+        return version
+    return None

@@ -5,8 +5,10 @@
         "title": "Tuya Chroma",
         "description": "Co chcesz dodać?",
         "menu_options": {
-          "chroma": "Razer Chroma (PC z Synapse)",
-          "tuya": "Oświetlenie Tuya (sieć lokalna)"
+          "tuya_core": "Światła Tuya z wbudowanej integracji Tuya",
+          "tuya_cloud": "Światła Tuya z mojego konta Tuya / Smart Life",
+          "tuya": "Oświetlenie Tuya (dane wpisane ręcznie)",
+          "chroma": "Razer Chroma (PC z Synapse)"
         }
       },
       "chroma": {
@@ -29,15 +31,41 @@
           "local_key": "Local key",
           "protocol_version": "Wersja protokołu"
         }
+      },
+      "tuya_cloud": {
+        "title": "Konto Tuya / Smart Life",
+        "description": "Otwórz aplikację Smart Life (lub Tuya Smart) → Ja → ⚙ Ustawienia → Konto i bezpieczeństwo → Kod użytkownika (User Code) i wpisz go tutaj. Konto służy tylko do odczytania kluczy urządzeń – potem światła są sterowane lokalnie.\n\n{error}",
+        "data": {
+          "user_code": "Kod użytkownika"
+        }
+      },
+      "tuya_scan": {
+        "title": "Zeskanuj kod QR",
+        "description": "Zeskanuj ten kod QR aplikacją Smart Life / Tuya Smart (ikona skanera w prawym górnym rogu), potwierdź logowanie w aplikacji i kliknij Zatwierdź.\n\n{error}"
+      },
+      "tuya_pick": {
+        "title": "Wybierz urządzenia",
+        "description": "Na koncie znaleziono {total} urządzeń, z czego {found} w sieci lokalnej. Światła są zaznaczone domyślnie.",
+        "data": {
+          "devices": "Urządzenia"
+        }
+      },
+      "tuya_ips": {
+        "title": "Adresy IP",
+        "description": "Nie znaleziono w sieci lokalnej {count} wybranych urządzeń (mogą być offline albo Home Assistant nie odbiera rozgłoszeń UDP). Wpisz ich adresy IP lub zostaw puste, aby pominąć."
       }
     },
     "error": {
       "cannot_connect": "Nie można się połączyć",
       "unknown": "Nieoczekiwany błąd",
-      "no_devices": "Wybierz co najmniej jedno urządzenie"
+      "no_devices": "Wybierz co najmniej jedno urządzenie",
+      "login_error": "Logowanie nie powiodło się"
     },
     "abort": {
-      "already_configured": "To urządzenie jest już skonfigurowane"
+      "already_configured": "To urządzenie jest już skonfigurowane",
+      "no_new_devices": "Brak nowych urządzeń – wszystkie urządzenia z tego konta są już dodane",
+      "no_devices_added": "Nie dodano żadnego urządzenia (brak adresów IP)",
+      "login_error": "Logowanie nie powiodło się"
     }
   },
   "options": {
@@ -46,7 +74,10 @@
         "title": "Synchronizacja",
         "description": "Opcjonalnie wybierz światło, którego kolor i jasność będą odwzorowywane (np. żarówka Tuya dla Razer Chroma).",
         "data": {
-          "follow_entity": "Światło źródłowe"
+          "follow_entity": "Światło źródłowe",
+          "host": "Adres IP",
+          "local_key": "Local key",
+          "protocol_version": "Wersja protokołu"
         }
       }
     }
