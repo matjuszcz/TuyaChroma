@@ -306,6 +306,7 @@ class App:
     def _build_profiles_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="Profile efektów")
+        self._profiles_tab_index = self.notebook.index("end") - 1
         left = ttk.Frame(tab)
         left.pack(side="left", fill="y")
         ttk.Label(left, text="Profile:").pack(anchor="w")
@@ -364,6 +365,9 @@ class App:
         self._preview_renderer = Renderer(self.config.settings.profile, seed=1)
         self._preview_next_key = 0.0
         self.refresh_profiles()
+        for var in (self.pf_effect, self.pf_mode, self.pf_direction, self.pf_speed,
+                    self.pf_density, self.pf_brightness):
+            var.trace_add("write", self._form_changed)
         self.root.after(100, self._draw_preview)
 
     # ------------------------------------------------------------- profiles
@@ -434,7 +438,10 @@ class App:
             settings.active_profile = new.name
         settings.profiles[settings.profiles.index(old)] = new
         self.refresh_profiles(select=new.name)
-        self.save_and_apply()
+        if settings.active_profile == new.name:
+            self.apply_profile_change()
+        else:
+            save(self.config)
         self.set_busy(f"Zapisano profil „{new.name}”.")
 
     def new_profile(self) -> None:
@@ -452,12 +459,14 @@ class App:
         if p is None or len(settings.profiles) <= 1:
             return
         settings.profiles.remove(p)
-        if settings.active_profile == p.name:
+        was_active = settings.active_profile == p.name
+        if was_active:
             settings.active_profile = settings.profiles[0].name
-            self.save_and_apply()
+        self.refresh_profiles()
+        if was_active:
+            self.apply_profile_change()
         else:
             save(self.config)
-        self.refresh_profiles()
 
     def activate_profile(self, name: str | None = None) -> None:
         p = self._selected_profile() if name is None else next(
@@ -466,17 +475,40 @@ class App:
             return
         self.config.settings.active_profile = p.name
         self.refresh_profiles(select=p.name)
-        self.save_and_apply()
+        self.apply_profile_change()
         self.set_busy(f"Aktywny profil: {p.name}")
+
+    def apply_profile_change(self) -> None:
+        """Save; switch the playing profile live (no flicker) or restart if needed."""
+        save(self.config)
+        if not self.config.settings.sync_enabled:
+            return
+        if not self.service.apply_profile(self.config):
+            self.save_and_apply()
+
+    def _preview_visible(self) -> bool:
+        try:
+            return (self.root.state() == "normal"
+                    and self.notebook.index(self.notebook.select()) == self._profiles_tab_index)
+        except tk.TclError:
+            return False
 
     def _draw_preview(self) -> None:
         if self._quitting:
             return
-        try:
-            self._render_preview()
-        except tk.TclError:
-            return
-        self.root.after(70, self._draw_preview)
+        if self._preview_visible():  # no drawing while hidden in the tray / other tab
+            try:
+                self._render_preview()
+            except tk.TclError:
+                return
+            self.root.after(70, self._draw_preview)
+        else:
+            self.root.after(500, self._draw_preview)
+
+    def _form_changed(self, *_args) -> None:
+        p = self._selected_profile()
+        if p is not None:
+            self._preview_renderer.set_profile(self._profile_from_form(p.name))
 
     def _render_preview(self) -> None:
         r = self._preview_renderer

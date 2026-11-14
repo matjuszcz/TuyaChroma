@@ -117,6 +117,7 @@ class SyncService:
         self.razer_status = "zatrzymane"
         self.game_active = False
         self.game_name = ""
+        self._profile: Profile | None = None
 
     @property
     def running(self) -> bool:
@@ -131,6 +132,7 @@ class SyncService:
             for w in self.workers:
                 w.start()
             self.player = None
+            self._profile = s.profile
             if s.idle in ("full", "effect"):
                 profile = s.profile
                 screen = self._screen_factory() if profile.effect == "ambient" else None
@@ -177,6 +179,28 @@ class SyncService:
             self.game_active = False
             self.game_name = ""
             _LOGGER.info("Sync stopped")
+
+    def apply_profile(self, config: AppConfig) -> bool:
+        """Switch the playing profile without restarting (no flicker).
+
+        Returns False if a restart is needed instead (e.g. not running).
+        """
+        with self._lock:
+            if not self.running or self.player is None:
+                return False
+            profile = config.settings.profile
+            renderer = self.player.renderer
+            renderer.screen = self._screen_factory() if profile.effect == "ambient" else None
+            renderer.set_profile(profile)
+            if profile.effect in KEY_EFFECTS and self._hook is None:
+                self._hook = self._keyhook_factory(renderer.key_pressed)
+                self._hook.start()
+            elif profile.effect not in KEY_EFFECTS and self._hook is not None:
+                self._hook.stop()
+                self._hook = None
+            self._profile = profile
+            _LOGGER.info("Profile switched to %s", profile.name)
+            return True
 
     def restart(self, config: AppConfig) -> None:
         self.stop()
@@ -250,9 +274,10 @@ class SyncService:
                 if self.player is not None:
                     self.player.paused = self.game_active
                     profile_frames, strip = self.player.latest()
+                profile = self._profile or settings.profile
                 dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
-                         settings.profile, allow_effect)
-                self.razer_status = self._status_text(idle, settings.profile.name)
+                         profile, allow_effect)
+                self.razer_status = self._status_text(idle, profile.name)
                 spent = time.monotonic() - started
                 if spent < period:
                     self._stop.wait(period - spent)

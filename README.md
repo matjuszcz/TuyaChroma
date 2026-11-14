@@ -136,7 +136,7 @@ Wskazówki:
 
 * **Oficjalna integracja Tuya** (przez chmurę) działa bez zmian.
 * **Gdy program steruje żarówką**, polecenia z HA lub aplikacji Tuya zostaną po chwili nadpisane. Dotyczy to też wyłączenia żarówki: efekt włączy ją z powrotem.
-  * Przy *Odtwarzaj efekt* (domyślnie) program steruje wybranymi żarówkami **przez cały czas, gdy działa Razer**.
+  * Przy *Pełnej synchronizacji* i *Profilu tylko na żarówkach* (domyślnie) program steruje wybranymi żarówkami **przez cały czas, gdy działa Razer**.
   * Przy *Oddaj żarówki do HA* steruje nimi tylko w trakcie gry.
 * Żeby sterować światłem z HA przy włączonym komputerze, użyj **Wstrzymaj sterowanie** w menu ikony. Żarówki od razu wracają do stanu sprzed przejęcia.
 * **Automatyzacje HA**, które często zmieniają te żarówki, będą się „przepychać” z programem, gdy ten nimi steruje. Możesz je np. wyłączać, gdy komputer jest włączony.

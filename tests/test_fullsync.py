@@ -194,3 +194,64 @@ def test_full_sync_service(monkeypatch) -> None:
     finally:
         service.stop()
     assert dll.calls[-1] == ("UnInit",)
+
+
+def test_live_profile_switch_without_restart(monkeypatch) -> None:
+    class Reader:
+        def __init__(self, sources):
+            pass
+
+        def wait(self, ms):
+            time.sleep(0.005)
+
+        def read(self, src):
+            return Frame(src, 13, None, 1)
+
+        def read_apps(self):
+            return ChromaApps(current_pid=OWN, apps={OWN: "x.exe"})
+
+        def close(self):
+            pass
+
+    hooks = []
+
+    class Hook:
+        def __init__(self, cb):
+            self.cb, self.running = cb, False
+            hooks.append(self)
+
+        def start(self):
+            self.running = True
+
+        def stop(self):
+            self.running = False
+
+    dll = FakeDll()
+    service = engine.SyncService(
+        reader_factory=Reader, worker_factory=lambda c: Recorder(c), service_check=lambda: True,
+        output_factory=lambda: NativeChroma(dll), keyhook_factory=Hook, screen_factory=lambda: None,
+        own_pid=OWN,
+    )
+    config = AppConfig(devices=[Device(id="a", name="a", local_key="k", ip="1.1.1.1", enabled=True)])
+    config.settings.idle = "full"
+    config.settings.active_profile = "Wave"
+    service.start(config)
+    try:
+        deadline = time.time() + 2
+        while time.time() < deadline and not any(c[0] == "CreateKeyboardEffect" for c in dll.calls):
+            time.sleep(0.01)
+        player = service.player
+        config.settings.active_profile = "Reaktywny"
+        assert service.apply_profile(config)
+        assert service.player is player  # same player: no restart
+        assert player.renderer.profile.effect == "reactive"
+        assert hooks and hooks[-1].running  # key presses are read only for key effects
+        config.settings.active_profile = "Ogień"
+        assert service.apply_profile(config)
+        assert not hooks[-1].running
+        time.sleep(0.1)
+        assert ("UnInit",) not in dll.calls  # Razer devices never fell back to Synapse
+        assert "Ogień" in service.razer_status
+    finally:
+        service.stop()
+    assert not service.apply_profile(config)  # not running -> caller restarts instead

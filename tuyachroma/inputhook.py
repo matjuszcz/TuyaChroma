@@ -27,14 +27,18 @@ class KeyboardHook:
         self._on_key = on_key
         self._thread: threading.Thread | None = None
         self._thread_id = 0
+        self._ready = threading.Event()
 
     def start(self) -> None:
         if sys.platform != "win32" or self._thread is not None:
             return
+        self._ready.clear()
         self._thread = threading.Thread(target=self._run, name="keyboard-hook", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
+        if self._thread is not None:
+            self._ready.wait(2)  # make sure the thread id is known before posting WM_QUIT
         if self._thread is not None and self._thread_id:
             ctypes.windll.user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
             self._thread.join(2)
@@ -74,6 +78,7 @@ class KeyboardHook:
         callback = HOOKPROC(proc)
         self._thread_id = kernel32.GetCurrentThreadId()
         hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, callback, kernel32.GetModuleHandleW(None), 0)
+        self._ready.set()
         if not hook:
             _LOGGER.warning("Keyboard hook failed (%s)", ctypes.get_last_error())
             return

@@ -461,3 +461,41 @@ def test_profiles_roundtrip(tmp_path) -> None:
     loaded = load(tmp_path / "c.json")
     assert loaded.settings == config.settings
     assert loaded.settings.profile.effect == "ripple"
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_gui_profiles_tab(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui
+
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    applied = []
+    monkeypatch.setattr(service, "apply_profile", lambda cfg: applied.append(cfg.settings.active_profile) or True)
+    config = AppConfig()
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    try:
+        app.notebook.select(app._profiles_tab_index)
+        for _ in range(10):
+            app.root.update()
+            time.sleep(0.02)
+        assert app._preview_visible() and app.preview.find_all()  # preview drawn
+
+        app.new_profile()
+        assert config.settings.profiles[-1].name == "Mój profil 1"
+        app.pf_name.set("Czerwone gwiazdy")
+        app.pf_effect.set(gui.EFFECT_LABELS["starlight"])
+        assert app._preview_renderer.profile.effect == "starlight"  # live preview
+        app.pf_colors[0] = "#ff0000"
+        app.save_profile()
+        assert config.settings.profiles[-1].name == "Czerwone gwiazdy"
+        assert config.settings.profiles[-1].effect == "starlight"
+        app.activate_profile()
+        assert config.settings.active_profile == "Czerwone gwiazdy" and applied == ["Czerwone gwiazdy"]
+        assert load(cfgmod.default_path()).settings.profile.color1 == "#ff0000"
+
+        app.notebook.select(0)
+        app.root.update()
+        assert not app._preview_visible()  # no drawing on other tabs / in the tray
+    finally:
+        app._quitting = True
+        app.root.destroy()
