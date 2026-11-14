@@ -1,155 +1,110 @@
-# Tuya Chroma – integracja Home Assistant
+# TuyaChroma
 
-Niestandardowa integracja Home Assistant, która:
+Program na Windows, który łączy **żarówki RGB Tuya** z **Razer Chroma**: gdy gra wysyła efekty Razer Chroma, wybrane żarówki w pokoju świecą tymi samymi kolorami.
 
-* **steruje oświetleniem Tuya lokalnie** (żarówki, taśmy LED – bez chmury, przez [tinytuya](https://github.com/jasonacox/tinytuya)),
-* **łączy się z Razer Chroma** (klawiatura, mysz, podkładka, słuchawki, keypad, Chroma Link) przez Chroma SDK REST API z Razer Synapse,
-* **synchronizuje kolory** – np. klawiatura i mysz Razer przyjmują kolor i jasność żarówki Tuya (lub dowolnego innego światła w HA).
+Na co dzień żarówki dalej działają z **Home Assistant**. Gdy włączasz komputer, program startuje razem z Windows i **przejmuje wybrane żarówki na czas efektów z gier**. Potem **oddaje je w stanie sprzed przejęcia**.
 
-> 🎮 **Efekty Razer Chroma z gier na żarówkach Tuya** (bez Home Assistant): zobacz program na Windows **[TuyaChroma Bridge](bridge/README.md)**.
+## Jak to działa
+
+```
+Gra z Razer Chroma ─► Razer Synapse (Chroma SDK) ─► TuyaChroma ─► żarówki Tuya (sieć lokalna)
+                                                                  ▲
+                         Home Assistant (poza grą) ───────────────┘
+```
+
+* **Logowanie kontem Tuya / Smart Life jako zwykły użytkownik.** Wpisujesz kod użytkownika z aplikacji i skanujesz kod QR. Program pobiera listę żarówek i ich klucze lokalne, a potem sam znajduje je w sieci (adres IP i wersję protokołu).
+* **Wybierasz żarówki**, którymi ma sterować Razer, oraz dla każdej źródło koloru (klawiatura, mysz, Chroma Link…) i strefę (np. lewa strona klawiatury).
+* **Kolory z gier** program odczytuje z usługi Razer Chroma SDK (tak samo jak [Artemis RGB](https://artemis-rgb.com/)) i wysyła do żarówek **lokalnie** (bez chmury, kilka razy na sekundę).
+* **Przejęcie i oddanie:**
+  * gdy gra zaczyna efekt, program zapamiętuje aktualny stan żarówki (ustawiony np. w HA) i przejmuje ją;
+  * gdy gra kończy efekt, wstrzymasz sterowanie, zamkniesz program, uśpisz lub wyłączysz komputer, żarówka **wraca do zapamiętanego stanu** i dalej działa z HA.
+
+### Co jest przechwytywane
+
+| Źródło | Działa? |
+|---|---|
+| Gry i aplikacje z Razer Chroma (Chroma SDK), np. efekty reagujące na rozgrywkę | ✅ |
+| Efekty z profilu Synapse / Chroma Studio (fala, spectrum itp. poza grą) | ❌ Synapse udostępnia je tylko aplikacjom z oficjalnym Razer App ID. Poza grą żarówki wracają do stanu z HA. |
+
+## Wymagania
+
+* Windows 10/11 z **Razer Synapse** (3 lub 4) i modułem **Chroma**. W Menedżerze zadań powinna być widoczna usługa `RzSDKService`.
+* Żarówki **RGB** Tuya (Smart Life / Tuya Smart) w tej samej sieci lokalnej co komputer.
+* Konto w aplikacji Smart Life lub Tuya Smart, w którym są te żarówki.
 
 ## Instalacja
 
-**HACS:** HACS → Integracje → ⋮ → *Niestandardowe repozytoria* → `https://github.com/matjuszcz/TuyaChroma` (kategoria *Integracja*) → zainstaluj *Tuya Chroma* → restart HA.
+1. Pobierz `TuyaChroma-windows.zip`:
+   * z zakładki **[Releases](../../releases)**, jeśli jest wydanie, albo
+   * z **[Actions](../../actions)** → ostatnie udane uruchomienie *Build TuyaChroma (Windows)* → *Artifacts* (wymaga zalogowania w GitHub).
+2. Rozpakuj go do stałego folderu, np. `C:\Program Files\TuyaChroma` albo `C:\TuyaChroma`.
+3. Uruchom `TuyaChroma.exe`. Program nie ma podpisu cyfrowego, więc Windows SmartScreen może go zablokować. Kliknij wtedy *Więcej informacji → Uruchom mimo to*.
 
-**Ręcznie:** skopiuj katalog `custom_components/tuya_chroma` do `config/custom_components/` w Home Assistant i zrestartuj HA.
+## Pierwsze uruchomienie
 
-Następnie: *Ustawienia → Urządzenia i usługi → Dodaj integrację → Tuya Chroma*. Kreator pyta, co dodać:
+### 1. Konto Tuya
 
-| Opcja | Co tworzy |
-|---|---|
-| **Razer Chroma (PC z Synapse)** | Jedną encję `light` na każde wybrane urządzenie Razer (np. `light.gaming_pc_keyboard`) |
-| **Oświetlenie Tuya (sieć lokalna)** | Encję `light` dla żarówki/taśmy Tuya (kolor HS, temperatura barwowa, jasność) |
+Zakładka **Konto Tuya**:
 
-Integrację możesz dodać wiele razy: każdą żarówkę Tuya i każdy komputer z Razer osobno.
+1. W aplikacji Smart Life: **Ja → ⚙ Ustawienia → Konto i bezpieczeństwo → Kod użytkownika** (*User Code*).
+2. Wpisz ten kod i kliknij **Pokaż kod QR**.
+3. Zeskanuj kod QR aplikacją (ikona skanera w prawym górnym rogu ekranu głównego) i potwierdź logowanie.
 
-## Konfiguracja Tuya
+Program pobierze urządzenia i przez około 10 s poszuka ich w sieci. Konto służy tylko do odczytania kluczy, a sterowanie odbywa się wyłącznie lokalnie. Program nie zapisuje tokenów logowania. Klucze żarówek są zapisywane zaszyfrowane (Windows DPAPI), w pliku `%APPDATA%\TuyaChroma\config.json`.
 
-Są trzy sposoby dodania świateł Tuya:
+> Program korzysta z tego samego logowania kodem QR co integracja Tuya w Home Assistant. Dlatego aplikacja Smart Life pokaże je jako autoryzację **„Home Assistant”**. Twoja dotychczasowa integracja Tuya w HA działa dalej.
 
-### 1. Z konta Tuya / Smart Life (zalecane)
+### 2. Wybór żarówek
 
-Nie potrzebujesz konta deweloperskiego ani żadnych kluczy.
+Zakładka **Żarówki**:
 
-1. *Dodaj integrację → Tuya Chroma → **Światła Tuya z mojego konta Tuya / Smart Life***.
-2. W aplikacji **Smart Life** (lub **Tuya Smart**): *Ja → ⚙ Ustawienia → Konto i bezpieczeństwo → Kod użytkownika* (*User Code*). Wpisz go w HA.
-3. HA pokaże **kod QR**. Zeskanuj go aplikacją (ikona skanera w prawym górnym rogu ekranu głównego), potwierdź logowanie i kliknij **Zatwierdź**.
-4. Integracja pobiera z konta listę urządzeń z ich **Local Key** i przez ~8 s nasłuchuje w sieci lokalnej, żeby znaleźć ich **adresy IP i wersję protokołu**.
-5. Zaznacz urządzenia (światła są zaznaczone domyślnie). Jeśli któregoś nie znaleziono w sieci, HA poprosi o jego IP.
-6. Każde urządzenie staje się osobną pozycją integracji. Wersja protokołu jest sprawdzana automatycznie.
+* kliknij w kolumnę **✓** przy żarówkach, którymi ma sterować Razer;
+* zaznacz żarówkę, żeby ustawić **źródło koloru**, **strefę** i **jasność**, a potem kliknij **Zapisz**;
+* **Testuj (mignij)**: żarówka mignie na czerwono, zielono i niebiesko, a potem wróci do poprzedniego stanu;
+* **Szukaj w sieci**: ponownie znajduje adresy IP (np. po zmianie routera).
 
-Konto Tuya jest używane **tylko podczas dodawania**. Integracja nie zapisuje tokenów logowania, a światła są potem sterowane wyłącznie lokalnie. Logowanie korzysta z tej samej autoryzacji „Home Assistant” co wbudowana integracja Tuya.
+Wskazówki:
+* **Chroma Link** to kanał, który wiele gier ustawia specjalnie dla oświetlenia otoczenia.
+* Dwie lampy można rozdzielić strefami, np. lewą na *Lewa strona*, a prawą na *Prawa strona*.
 
-### 2. Z wbudowanej integracji Tuya
+### 3. Ustawienia
 
-Jeśli masz już skonfigurowaną oficjalną integrację **Tuya** w HA, w menu pojawi się **Światła Tuya z wbudowanej integracji Tuya**. Klucze zostaną wtedy wzięte z niej, bez ponownego logowania.
+* **Uruchamiaj razem z Windows** (domyślnie włączone): program startuje po zalogowaniu do Windows, zminimalizowany do zasobnika obok zegara.
+* **Gdy żadna gra nie wysyła efektów:** *wróć do stanu sprzed przejęcia* (domyślnie, czyli sterowanie z HA) albo *zostaw ostatni kolor z gry*.
 
-### 3. Ręcznie
+## Na co dzień
 
-Wybierz **Oświetlenie Tuya (dane wpisane ręcznie)** i podaj IP, Device ID, Local Key i wersję protokołu (najczęściej 3.3; nowsze urządzenia 3.4/3.5). Dane możesz uzyskać np. przez `python -m tinytuya wizard` (wymaga konta na [iot.tuya.com](https://iot.tuya.com)).
+* Program działa w **zasobniku** (zielona ikona obok zegara). Zamknięcie okna chowa je do zasobnika.
+* Menu ikony: **Otwórz**, **Wstrzymaj sterowanie** (żarówki od razu wracają do HA) albo **Włącz sterowanie**, **Zakończ**.
+* Kropka w oknie programu: 🟢 efekt z gry jest aktywny, 🔵 program czeka na grę, 🟡 wymaga uwagi (np. Synapse nie działa albo nie wybrano żarówek).
 
-### Uwagi
+## Uwagi o Home Assistant
 
-* Nadaj urządzeniom Tuya **stałe adresy IP** w routerze.
-* Wykrywanie w sieci wymaga, by HA odbierał rozgłoszenia UDP (porty 6666, 6667, 7000). Działa to w Home Assistant OS i w Dockerze z `network_mode: host`. W innych przypadkach wpisz IP ręcznie.
-* **Zmiana IP, Local Key lub wersji protokołu**: *pozycja urządzenia → Konfiguruj*. Local Key zmienia się po ponownym sparowaniu urządzenia w aplikacji. Najprościej wtedy usunąć urządzenie i zaimportować je z konta jeszcze raz.
-* Urządzenia Zigbee/BLE podłączone przez bramkę nie mają własnego klucza lokalnego i nie są obsługiwane.
-
-Obsługiwane są typowe żarówki i taśmy Tuya (DP 1–9 lub 20–28; RGB, RGB+CCT, CCT, ściemniane). Typ jest wykrywany automatycznie.
-
-## Konfiguracja Razer Chroma
-
-Wymagany jest Windows z **Razer Synapse** i włączonym modułem **Chroma Connect / Chroma SDK** (*Synapse → Chroma → Connect → Apps → włącz „Chroma Apps"*).
-
-Chroma SDK nasłuchuje tylko na `localhost` (port `54235`, a sesja dostaje kolejny port, zwykle `54236`). Jeśli Home Assistant działa na innym urządzeniu (Raspberry Pi, NAS itp.), udostępnij te porty w sieci LAN. Na PC z Synapse uruchom **PowerShell jako administrator** (podstaw adres IP swojego komputera w LAN):
-
-```powershell
-$ip = "192.168.1.50"   # IP tego komputera w sieci LAN
-foreach ($port in 54235..54240) {
-  netsh interface portproxy add v4tov4 listenaddress=$ip listenport=$port connectaddress=127.0.0.1 connectport=$port
-}
-netsh advfirewall firewall add rule name="Razer Chroma SDK (Home Assistant)" dir=in action=allow protocol=TCP localport=54235-54240 remoteip=localsubnet
-```
-
-Test z innego komputera: `curl http://192.168.1.50:54235/razer/chromasdk` powinien zwrócić JSON z wersją SDK.
-
-Cofnięcie zmian: `netsh interface portproxy reset` i usunięcie reguły zapory.
-
-W kreatorze HA podaj IP komputera, port `54235` i wybierz urządzenia. Integracja:
-
-* tworzy sesję Chroma SDK i podtrzymuje ją co 10 s (heartbeat),
-* po wyłączeniu PC lub restarcie Synapse oznacza encje jako niedostępne, a po powrocie łączy się ponownie i przywraca ostatnie kolory,
-* po usunięciu integracji / zatrzymaniu HA zamyka sesję, więc Synapse wraca do efektów z profilu.
-
-> Chroma SDK nie udostępnia aktualnego koloru, więc stan encji Razer jest „zakładany" (optymistyczny) i przywracany po restarcie HA.
-
-## Synchronizacja Tuya ⇄ Razer
-
-Na integracji kliknij **Konfiguruj** i wybierz **Światło źródłowe**. Od tej chwili wszystkie światła tej pozycji odwzorowują jego stan (włącz/wyłącz, kolor, jasność, temperaturę barwową).
-
-* **Razer podąża za Tuya:** skonfiguruj pozycję *Razer Chroma* → źródło `light.lampka_biurko` (Tuya).
-* **Tuya podąża za Razer:** skonfiguruj pozycję *Tuya* → źródło `light.gaming_pc_keyboard`.
-* Źródłem może być **dowolne** światło w HA (Hue, WLED, grupa świateł, oficjalna integracja Tuya…).
-
-⚠️ Nie ustawiaj synchronizacji w obie strony jednocześnie (A → B i B → A), bo utworzysz pętlę.
-
-## Przykładowe automatyzacje
-
-Klawiatura na czerwono, gdy ktoś dzwoni do drzwi:
-
-```yaml
-automation:
-  - alias: "Dzwonek – czerwona klawiatura"
-    triggers:
-      - trigger: state
-        entity_id: binary_sensor.dzwonek
-        to: "on"
-    actions:
-      - action: light.turn_on
-        target:
-          entity_id:
-            - light.gaming_pc_keyboard
-            - light.gaming_pc_mouse
-        data:
-          rgb_color: [255, 0, 0]
-          brightness: 255
-```
-
-Wieczorem przyciemnij lampkę Tuya i ustaw ciepłą barwę:
-
-```yaml
-      - action: light.turn_on
-        target:
-          entity_id: light.lampka_biurko
-        data:
-          color_temp_kelvin: 2700
-          brightness_pct: 30
-```
+* **Oficjalna integracja Tuya** (przez chmurę) działa bez zmian. W czasie efektu z gry polecenia z HA zostaną po chwili nadpisane kolorami z gry. Po grze żarówka wraca do stanu sprzed przejęcia.
+* Jeśli masz **automatyzacje HA**, które często zmieniają te żarówki, w czasie gry będą się „przepychać” z programem. Możesz np. wyłączać je, gdy komputer jest włączony.
+* **Lokalne integracje** (LocalTuya, Tuya Local) mogą w czasie działania programu pokazywać żarówkę jako niedostępną. Część żarówek Tuya przyjmuje tylko jedno połączenie lokalne naraz.
 
 ## Rozwiązywanie problemów
 
-Włącz logi debug w `configuration.yaml`:
-
-```yaml
-logger:
-  logs:
-    custom_components.tuya_chroma: debug
-    tinytuya: debug
-```
+Logi znajdziesz w *Ustawienia → Otwórz folder z logami* (`%APPDATA%\TuyaChroma\log.txt`).
 
 | Problem | Rozwiązanie |
 |---|---|
-| Tuya: logowanie kodem QR się nie udaje | Kod użytkownika musi pochodzić z tej samej aplikacji, którą skanujesz. Kod QR jest jednorazowy: po błędzie HA pokazuje nowy. |
-| Tuya: urządzenie bez IP po imporcie | HA nie odbiera rozgłoszeń UDP albo urządzenie jest offline. Wpisz IP ręcznie. |
-| Tuya: „Nie można się połączyć" | Sprawdź IP, Local Key i wersję protokołu (spróbuj 3.3/3.4/3.5). Zamknij aplikację Smart Life na telefonie – niektóre urządzenia obsługują tylko jedno połączenie lokalne naraz. |
-| Razer: „Nie można się połączyć" | Czy Synapse działa i Chroma Apps jest włączone? Czy `curl http://IP:54235/razer/chromasdk` działa z innego komputera? |
-| Razer: sesja się tworzy, ale kolory się nie zmieniają | Port sesji jest spoza zakresu 54235–54240: w logach debug znajdziesz `Chroma session created: http://IP:PORT/...` – dodaj ten port do portproxy. |
+| „Razer niedostępny: Shared memory … not found” | Synapse nie działa albo moduł Chroma nie jest zainstalowany. Sprawdź, czy działa `RzSDKService`. |
+| Program czeka na grę, a gra ma efekty | Gra nie używa Razer Chroma albo ma je wyłączone w swoich ustawieniach. |
+| Żarówka: „nie znaleziono w sieci” | Kliknij *Szukaj w sieci*. Jeśli nie pomoże, wpisz IP ręcznie (znajdziesz je w routerze lub aplikacji Smart Life). Komputer i żarówki muszą być w tej samej sieci. |
+| Żarówka: błąd połączenia | Kliknij *Testuj*. Wyłącz lokalne integracje tej żarówki w HA. Po ponownym sparowaniu żarówki w aplikacji zaloguj się ponownie, bo zmienia się wtedy jej klucz. |
+| „nieobsługiwana (brak koloru RGB)” | To żarówka tylko z białym światłem, więc nie może pokazywać kolorów. |
+| Logowanie QR się nie udaje | Kod użytkownika musi pochodzić z tej samej aplikacji, którą skanujesz. Kod QR jest ważny około 3 minut. |
 
 ## Rozwój
 
 ```bash
-pip install -r requirements_test.txt
+pip install -r requirements.txt pytest
 pytest
+python -m tuyachroma        # uruchomienie z kodu źródłowego
 ```
 
-Testy symulują Chroma SDK, żarówkę Tuya, logowanie do konta Tuya i rozgłoszenia UDP.
+Exe budowany jest w GitHub Actions (`.github/workflows/build.yml`). Wydanie powstaje po wypchnięciu tagu `v*`.
+
+Licencje: odczyt danych Razer Chroma bazuje na [RazerSdkReader](https://github.com/diogotr7/RazerSdkReader) (MIT). Szczegóły w [NOTICE](NOTICE).

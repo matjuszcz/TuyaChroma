@@ -1,0 +1,69 @@
+name: Build TuyaChroma (Windows)
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest pyinstaller==6.11.1
+
+      - name: Tests (incl. Windows shared memory, DPAPI and GUI)
+        run: python -m pytest -v
+
+      - name: Icon
+        run: python tools/make_icon.py icon.ico
+
+      - name: Build exe
+        run: >
+          pyinstaller --onefile --noconsole --name TuyaChroma --icon icon.ico
+          --collect-submodules tinytuya --collect-submodules tuya_sharing
+          --hidden-import pystray._win32 --hidden-import PIL.ImageTk
+          TuyaChroma.py
+
+      - name: Smoke test (start, keep running, log written)
+        shell: pwsh
+        run: |
+          $env:APPDATA = "$env:RUNNER_TEMP\appdata"
+          $p = Start-Process dist\TuyaChroma.exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { Write-Error "exe exited with code $($p.ExitCode)"; Get-Content "$env:APPDATA\TuyaChroma\log.txt" -ErrorAction SilentlyContinue; exit 1 }
+          Stop-Process -Id $p.Id
+          Get-Content "$env:APPDATA\TuyaChroma\log.txt"
+          if (-not (Select-String -Path "$env:APPDATA\TuyaChroma\log.txt" -Pattern "TuyaChroma .* starting")) { exit 1 }
+          if (Select-String -Path "$env:APPDATA\TuyaChroma\log.txt" -Pattern "Traceback") { exit 1 }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory pkg | Out-Null
+          Copy-Item dist/TuyaChroma.exe, README.md, NOTICE pkg/
+          Compress-Archive -Path pkg/* -DestinationPath TuyaChroma-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TuyaChroma-windows
+          path: TuyaChroma-windows.zip
+
+      - name: Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: TuyaChroma-windows.zip

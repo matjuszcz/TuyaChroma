@@ -1,3 +1,0 @@
-pytest-homeassistant-custom-component
-tinytuya==1.21.1
-tuya-device-sharing-sdk
