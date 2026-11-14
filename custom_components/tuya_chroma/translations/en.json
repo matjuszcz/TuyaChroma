@@ -1,0 +1,66 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tuya Chroma",
+        "description": "What do you want to add?",
+        "menu_options": {
+          "chroma": "Razer Chroma (PC with Synapse)",
+          "tuya": "Tuya light (local network)"
+        }
+      },
+      "chroma": {
+        "title": "Razer Chroma",
+        "description": "IP address of the Windows PC running Razer Synapse with the Chroma SDK. See README for exposing port 54235 on the LAN.",
+        "data": {
+          "name": "Name",
+          "host": "Host",
+          "port": "Port",
+          "chroma_devices": "Devices"
+        }
+      },
+      "tuya": {
+        "title": "Tuya light",
+        "description": "Local control of a Tuya bulb / LED strip. Device ID and local key can be obtained with `python -m tinytuya wizard`.",
+        "data": {
+          "name": "Name",
+          "host": "IP address",
+          "device_id": "Device ID",
+          "local_key": "Local key",
+          "protocol_version": "Protocol version"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "unknown": "Unexpected error",
+      "no_devices": "Select at least one device"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sync",
+        "description": "Optionally pick a light whose color and brightness these lights will mirror (e.g. a Tuya bulb for Razer Chroma).",
+        "data": {
+          "follow_entity": "Mirror light"
+        }
+      }
+    }
+  },
+  "selector": {
+    "chroma_devices": {
+      "options": {
+        "keyboard": "Keyboard",
+        "mouse": "Mouse",
+        "mousepad": "Mousepad",
+        "headset": "Headset",
+        "keypad": "Keypad",
+        "chromalink": "Chroma Link"
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "domain": "tuya_chroma",
+  "name": "Tuya Chroma",
+  "codeowners": ["@matjuszcz"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/matjuszcz/TuyaChroma",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/matjuszcz/TuyaChroma/issues",
+  "loggers": ["tinytuya"],
+  "requirements": ["tinytuya==1.21.1"],
+  "version": "0.1.0"
+}

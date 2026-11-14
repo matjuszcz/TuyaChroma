@@ -1,0 +1,66 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tuya Chroma",
+        "description": "Co chcesz dodać?",
+        "menu_options": {
+          "chroma": "Razer Chroma (PC z Synapse)",
+          "tuya": "Oświetlenie Tuya (sieć lokalna)"
+        }
+      },
+      "chroma": {
+        "title": "Razer Chroma",
+        "description": "Adres IP komputera z Windows i Razer Synapse (Chroma SDK). W README opisano, jak udostępnić port 54235 w sieci LAN.",
+        "data": {
+          "name": "Nazwa",
+          "host": "Host",
+          "port": "Port",
+          "chroma_devices": "Urządzenia"
+        }
+      },
+      "tuya": {
+        "title": "Oświetlenie Tuya",
+        "description": "Lokalne sterowanie żarówką / taśmą LED Tuya. Device ID i local key uzyskasz poleceniem `python -m tinytuya wizard`.",
+        "data": {
+          "name": "Nazwa",
+          "host": "Adres IP",
+          "device_id": "Device ID",
+          "local_key": "Local key",
+          "protocol_version": "Wersja protokołu"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie można się połączyć",
+      "unknown": "Nieoczekiwany błąd",
+      "no_devices": "Wybierz co najmniej jedno urządzenie"
+    },
+    "abort": {
+      "already_configured": "To urządzenie jest już skonfigurowane"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Synchronizacja",
+        "description": "Opcjonalnie wybierz światło, którego kolor i jasność będą odwzorowywane (np. żarówka Tuya dla Razer Chroma).",
+        "data": {
+          "follow_entity": "Światło źródłowe"
+        }
+      }
+    }
+  },
+  "selector": {
+    "chroma_devices": {
+      "options": {
+        "keyboard": "Klawiatura",
+        "mouse": "Mysz",
+        "mousepad": "Podkładka",
+        "headset": "Słuchawki",
+        "keypad": "Keypad",
+        "chromalink": "Chroma Link"
+      }
+    }
+  }
+}
