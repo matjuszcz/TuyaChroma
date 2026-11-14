@@ -75,6 +75,7 @@ class Settings:
     active_profile: str = "Wave"
     bulb_effect_rate: float = 1.0  # bulb color changes per second while a profile plays
     keyboard_layout: str = "auto"  # auto (detected) | full | tkl | mini (60%)
+    auto_update: bool = True  # check for program and device database updates daily
     fps: float = 20
     sync_enabled: bool = True
 

@@ -8,7 +8,7 @@ from logging.handlers import RotatingFileHandler
 import sys
 import threading
 
-from . import __version__, winsys
+from . import __version__, updater, winsys
 from .config import config_dir, load
 from .engine import SyncService
 
@@ -37,6 +37,7 @@ def setup_logging(verbose: bool) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="TuyaChroma")
     parser.add_argument("--minimized", action="store_true", help="start in the tray")
+    parser.add_argument("--updated", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
@@ -51,7 +52,9 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # noqa: BLE001
             pass
 
-    if not winsys.acquire_single_instance():
+    if args.updated:
+        _LOGGER.info("Started after an update")
+    if not winsys.acquire_single_instance(wait_seconds=30 if args.updated else 0):
         import tkinter as tk  # noqa: PLC0415
         from tkinter import messagebox  # noqa: PLC0415
 
@@ -62,6 +65,14 @@ def main(argv: list[str] | None = None) -> int:
         root.destroy()
         return 0
 
+    if updater.can_self_update():
+        updater.cleanup_old()
+    try:
+        from . import devices_db  # noqa: PLC0415
+
+        _LOGGER.info("Razer device database version %s", devices_db.load()["version"])
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Razer device database: %s", err)
     config = load()
     # "Pause" is temporary: every start (e.g. turning the PC on) takes the bulbs over again.
     config.settings.sync_enabled = True

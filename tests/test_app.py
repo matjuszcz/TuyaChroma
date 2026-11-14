@@ -424,7 +424,7 @@ def test_pause_is_not_kept_after_restart(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(mainmod, "load", lambda: config)
     monkeypatch.setattr(mainmod, "SyncService", FakeService)
     monkeypatch.setattr(mainmod, "setup_logging", lambda v: None)
-    monkeypatch.setattr(mainmod.winsys, "acquire_single_instance", lambda: True)
+    monkeypatch.setattr(mainmod.winsys, "acquire_single_instance", lambda **kw: True)
     monkeypatch.setattr(mainmod.winsys, "set_autostart", lambda *a: None)
     monkeypatch.setattr(mainmod.winsys, "start_system_event_listener", lambda **kw: None)
     import tuyachroma.gui as guimod
@@ -590,6 +590,34 @@ def test_gui_razer_devices_and_account_refresh(tmp_path, monkeypatch) -> None:
         assert config.device("n1").ip == "10.0.0.7" and config.tuya_session.get("refreshed")
         app.logout()
         assert config.tuya_session == {} and load(cfgmod.default_path()).tuya_session == {}
+    finally:
+        service.stop()
+        app._quitting = True
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_gui_update_available(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui, updater
+
+    rel = updater.Release("99.0.0", "v99.0.0", "Nowości", "https://gh/rel", "https://dl", 1, "ab")
+    monkeypatch.setattr(updater, "check_latest", lambda: rel)
+    monkeypatch.setattr(updater, "can_self_update", lambda: False)
+    opened = []
+    monkeypatch.setattr(gui.webbrowser, "open", lambda url: opened.append(url))
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(AppConfig(), service, start_hidden=False, use_tray=False)
+    try:
+        app.check_updates(manual=True)
+        deadline = time.time() + 5
+        while time.time() < deadline and app.available_release is None:
+            app.root.update()
+            time.sleep(0.02)
+        assert "99.0.0" in app.update_status.get()
+        assert app.update_button.winfo_manager() == "pack"  # "Zaktualizuj do 99.0.0" visible
+        app.install_update()  # running from source: opens the release page instead
+        assert opened == ["https://gh/rel"]
     finally:
         service.stop()
         app._quitting = True

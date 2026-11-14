@@ -11,10 +11,11 @@ import sys
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import colorchooser, messagebox, ttk
 from typing import Any
 
-from . import __version__, razer_devices, winsys
+from . import __version__, devices_db, razer_devices, updater, winsys
 from .bulbs import probe_version
 from .config import IDLE_MODES, SOURCES, ZONES, AppConfig, Device, config_dir, save
 from .engine import SyncService
@@ -84,6 +85,8 @@ class App:
         self._login_deadline = 0.0
         self._quitting = False
         self._tray_hint_shown = False
+        self.available_release: updater.Release | None = None
+        self._notified_version = ""
 
         self.root = tk.Tk()
         self.root.title("TuyaChroma")
@@ -107,6 +110,7 @@ class App:
             self._tray_hint_shown = True  # autostart: stay quiet
         self.root.after(200, self._pump)
         self.root.after(1000, self._tick)
+        self.root.after(20_000, self._auto_update_check)  # shortly after start, then daily
 
     # ----------------------------------------------------------- utilities
 
@@ -168,6 +172,7 @@ class App:
         ttk.Label(top, text="TuyaChroma", style="Header.TLabel").pack(side="left")
         self.sync_button = ttk.Button(top, command=self.toggle_sync)
         self.sync_button.pack(side="right")
+        self.update_button = ttk.Button(top, command=self.install_update)  # shown when available
         self.dot = tk.Canvas(top, width=14, height=14, highlightthickness=0)
         self.dot.pack(side="left", padx=(14, 6))
         self.status_var = tk.StringVar()
@@ -315,6 +320,16 @@ class App:
                   "Po wyłączeniu komputera, uśpieniu, zamknięciu Synapse lub programu albo wstrzymaniu "
                   "sterowania żarówki wracają do stanu sprzed przejęcia i dalej działają z Home Assistant."),
         ).pack(anchor="w", pady=(16, 0))
+        upd = ttk.LabelFrame(tab, text="Aktualizacje", padding=8)
+        upd.pack(anchor="w", fill="x", pady=(12, 0))
+        self.set_auto_update = tk.BooleanVar(value=s.auto_update)
+        ttk.Checkbutton(upd, text="Sprawdzaj codziennie aktualizacje programu i bazy urządzeń Razer",
+                        variable=self.set_auto_update).pack(anchor="w")
+        urow = ttk.Frame(upd)
+        urow.pack(anchor="w", pady=(6, 0))
+        ttk.Button(urow, text="Sprawdź teraz", command=lambda: self.check_updates(manual=True)).pack(side="left")
+        self.update_status = tk.StringVar(value=f"Zainstalowana wersja: {__version__}")
+        ttk.Label(urow, textvariable=self.update_status).pack(side="left", padx=10)
         row = ttk.Frame(tab)
         row.pack(anchor="w", pady=(16, 0))
         ttk.Button(row, text="Zapisz ustawienia", command=self.save_settings).pack(side="left")
@@ -719,6 +734,10 @@ class App:
         self.razer_info = tk.StringVar(value="Wyszukuję urządzenia Razer…")
         ttk.Label(bar, textvariable=self.razer_info).pack(side="left")
         ttk.Button(bar, text="Odśwież listę", command=self.refresh_razer_devices).pack(side="right")
+        ttk.Button(bar, text="Aktualizuj bazę urządzeń", command=lambda: self.update_device_db(manual=True)).pack(side="right", padx=6)
+        self.db_info = tk.StringVar()
+        ttk.Label(tab, textvariable=self.db_info, foreground="#555").pack(anchor="w")
+        self._show_db_info()
         cols = ("name", "type", "conn", "sdk", "note")
         self.razer_tree = ttk.Treeview(tab, columns=cols, show="headings", height=10)
         for col, title, width in (("name", "Urządzenie", 250), ("type", "Typ", 115),
@@ -767,6 +786,101 @@ class App:
                                 f"{layout} (odświeżono {stamp}).")
         else:
             self.razer_info.set(f"Nie wykryto urządzeń Razer (odświeżono {stamp}).")
+
+    # -------------------------------------------------------------- updates
+
+    def _show_db_info(self, extra: str = "") -> None:
+        try:
+            db = devices_db.load()
+            text = f"Baza urządzeń Razer: wersja {db['version']} ({db.get('updated', '?')})"
+        except devices_db.DatabaseError as err:
+            text = f"Baza urządzeń Razer: {err}"
+        self.db_info.set(text + (f" – {extra}" if extra else ""))
+
+    def _auto_update_check(self) -> None:
+        if self._quitting:
+            return
+        if self.config.settings.auto_update:
+            self.check_updates(manual=False)
+            self.update_device_db(manual=False)
+        self.root.after(24 * 3600 * 1000, self._auto_update_check)
+
+    def check_updates(self, manual: bool = True) -> None:
+        if manual:
+            self.update_status.set("Sprawdzam…")
+
+        def done(release) -> None:
+            if release is None:
+                self.update_status.set(f"Wersja {__version__} – brak opublikowanych wydań.")
+                return
+            if not updater.is_newer(release.version):
+                self.available_release = None
+                self.update_status.set(f"Masz najnowszą wersję ({__version__}).")
+                return
+            self.available_release = release
+            self.update_status.set(f"Dostępna nowa wersja {release.version} (masz {__version__}).")
+            self.update_button.configure(text=f"Zaktualizuj do {release.version}")
+            self.update_button.pack(side="right", padx=(0, 8), before=self.sync_button)
+            if self._tray is not None and self._notified_version != release.version:
+                self._notified_version = release.version
+                try:
+                    self._tray.notify(f"Dostępna nowa wersja {release.version}. Otwórz program, "
+                                      "żeby zaktualizować.", "TuyaChroma")
+                except Exception:  # noqa: BLE001
+                    pass
+
+        def failed(err: Exception) -> None:
+            if manual:
+                self.update_status.set(f"Nie udało się sprawdzić: {err}")
+
+        self.run_bg(updater.check_latest, done, failed)
+
+    def install_update(self) -> None:
+        release = self.available_release
+        if release is None:
+            return
+        if not updater.can_self_update():
+            webbrowser.open(release.page_url)
+            return
+        notes = f"\n\nCo nowego:\n{release.notes[:600]}" if release.notes else ""
+        if not messagebox.askyesno(
+                "TuyaChroma",
+                f"Zaktualizować do wersji {release.version}?\n"
+                f"Program pobierze ją z GitHub, sprawdzi sumę kontrolną i uruchomi się ponownie. "
+                f"Żarówki na chwilę wrócą do HA.{notes}", parent=self.root):
+            return
+        self.set_busy("Pobieram aktualizację…")
+        self.update_button.configure(state="disabled")
+
+        def run():
+            self.service.stop()  # give the bulbs back before the swap
+            updater.apply_update(release)
+
+        def failed(err: Exception) -> None:
+            self.update_button.configure(state="normal")
+            self.set_busy(f"Aktualizacja nie powiodła się: {err}")
+            if self.config.settings.sync_enabled:
+                self.run_bg(lambda: self.service.start(self.config))
+
+        self.run_bg(run, lambda _r: self.quit(), failed)
+
+    def update_device_db(self, manual: bool = True) -> None:
+        if manual:
+            self._show_db_info("sprawdzam…")
+
+        def done(result) -> None:
+            updated, version = result
+            if updated:
+                self._show_db_info("zaktualizowano")
+                self.refresh_razer_devices()
+            else:
+                self._show_db_info("aktualna" if manual else "")
+
+        def failed(err: Exception) -> None:
+            if manual:
+                self._show_db_info(f"nie udało się: {err}")
+
+        self.run_bg(devices_db.update, done, failed)
 
     # -------------------------------------------------------------- account
 
@@ -904,6 +1018,7 @@ class App:
             s.bulb_effect_rate = max(0.5, min(5.0, float(self.set_bulb_rate.get())))
         except (tk.TclError, ValueError):
             s.bulb_effect_rate = 1.0
+        s.auto_update = self.set_auto_update.get()
         s.keyboard_layout = _label_to_key(LAYOUT_LABELS, self.set_layout.get())
         if s.keyboard_layout not in LAYOUT_LABELS:
             s.keyboard_layout = "auto"

@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "updated": "2026-11-14",
+  "description": "Razer device database for TuyaChroma: how connected devices are recognised. Rules are matched against the device name (lower case); the first matching rule wins.",
+  "rules": [
+    {
+      "category": "keypad",
+      "keywords": [
+        "tartarus",
+        "orbweaver",
+        "nostromo"
+      ]
+    },
+    {
+      "category": "controller",
+      "keywords": [
+        "wolverine",
+        "kitsune",
+        "raiju",
+        "raion",
+        "panthera",
+        "atrox",
+        "kishi",
+        "sabertooth"
+      ]
+    },
+    {
+      "category": "headset",
+      "keywords": [
+        "kraken",
+        "blackshark",
+        "barracuda",
+        "nari",
+        "tiamat",
+        "thresher",
+        "man o' war",
+        "man o war",
+        "electra",
+        "hammerhead",
+        "opus"
+      ]
+    },
+    {
+      "category": "mousepad",
+      "keywords": [
+        "firefly",
+        "goliathus",
+        "strider",
+        "base station",
+        "mouse dock",
+        "charging pad",
+        "mouse bungee",
+        "sphex",
+        "acari",
+        "gigantus"
+      ]
+    },
+    {
+      "category": "mouse",
+      "keywords": [
+        "deathadder",
+        "basilisk",
+        "viper",
+        "naga",
+        "mamba",
+        "lancehead",
+        "cobra",
+        "orochi",
+        "abyssus",
+        "atheris",
+        "pro click",
+        "diamondback",
+        "imperator",
+        "ouroboros",
+        "taipan",
+        "hyperspeed mouse",
+        " mouse"
+      ]
+    },
+    {
+      "category": "keyboard",
+      "keywords": [
+        "blackwidow",
+        "huntsman",
+        "ornata",
+        "cynosa",
+        "deathstalker",
+        "turret",
+        "blade",
+        "book",
+        "pro type",
+        "anansi",
+        "lycosa",
+        " keyboard"
+      ]
+    },
+    {
+      "category": "chromalink",
+      "keywords": [
+        "nommo",
+        "leviathan",
+        "seiren",
+        "core x",
+        "thunderbolt",
+        "dock",
+        "chroma argb",
+        "argb controller",
+        "addressable",
+        "laptop stand",
+        "cooling pad",
+        "raptor",
+        "kiyo",
+        "aether",
+        "iskur",
+        "enki",
+        "chroma hdk",
+        "hdk"
+      ]
+    }
+  ],
+  "keyboard_layouts": {
+    "mini": [
+      "mini"
+    ],
+    "tkl": [
+      "tkl",
+      "tenkeyless"
+    ]
+  },
+  "notes": [
+    {
+      "match": "wolverine v2 chroma",
+      "note": "bez Synapse – światło w aplikacji Razer Controller Setup",
+      "no_chroma_sdk": true
+    },
+    {
+      "match": "mouse bungee v3",
+      "note": "jeśli nie reaguje na efekty, sprawdź je w Synapse/Chroma Studio"
+    },
+    {
+      "match": "addressable rgb controller",
+      "note": "taśmy i wentylatory ARGB przez Chroma Link"
+    },
+    {
+      "match": "chroma argb",
+      "note": "taśmy i wentylatory ARGB przez Chroma Link"
+    }
+  ],
+  "pids": {
+    "0257": {
+      "name": "Razer Huntsman Mini",
+      "category": "keyboard"
+    },
+    "0099": {
+      "name": "Razer Basilisk V3",
+      "category": "mouse"
+    }
+  }
+}

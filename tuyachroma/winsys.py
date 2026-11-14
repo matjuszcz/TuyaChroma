@@ -53,15 +53,30 @@ def get_autostart() -> bool:
 _instance_handle = None
 
 
-def acquire_single_instance() -> bool:
-    """False if another copy of the program is already running."""
+def acquire_single_instance(wait_seconds: float = 0) -> bool:
+    """False if another copy of the program is already running.
+
+    ``wait_seconds``: after an update the new version waits for the old one to exit.
+    """
     global _instance_handle
     if sys.platform != "win32":
         return True
+    import time  # noqa: PLC0415
+
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.CreateMutexW.restype = ctypes.c_void_p
-    _instance_handle = k32.CreateMutexW(None, False, "Local\\TuyaChromaSingleInstance")
-    return ctypes.get_last_error() != 183  # ERROR_ALREADY_EXISTS
+    k32.CloseHandle.argtypes = [ctypes.c_void_p]
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        handle = k32.CreateMutexW(None, False, "Local\\TuyaChromaSingleInstance")
+        if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
+            _instance_handle = handle
+            return True
+        if handle:
+            k32.CloseHandle(handle)
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
 
 
 # ------------------------------------------------------------------ events

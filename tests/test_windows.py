@@ -132,3 +132,16 @@ def test_windows_device_list() -> None:
     assert all(isinstance(i, str) and "\\" in i for i, _name in entries)
     assert any(name for _i, name in entries)  # names are read
     assert razer_devices.detect() == []  # no Razer hardware on the build machine
+
+
+def test_single_instance_waits_after_update() -> None:
+    import time
+
+    from tuyachroma import winsys
+
+    winsys.acquire_single_instance()  # this process holds the instance mutex ("old copy")
+    first = winsys._instance_handle
+    started = time.monotonic()
+    assert not winsys.acquire_single_instance(wait_seconds=1.0)  # old copy still running
+    assert time.monotonic() - started >= 0.9  # it really waited
+    winsys._instance_handle = first

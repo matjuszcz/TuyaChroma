@@ -166,6 +166,13 @@ Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life 
 * Jeśli program zostanie przerwany nagle (zanik prądu, zabicie procesu), żarówki zostaną na ostatnim kolorze, ale HA może nimi normalnie sterować.
 * **Lokalne integracje** (LocalTuya, Tuya Local) mogą w czasie działania programu pokazywać żarówkę jako niedostępną. Część żarówek Tuya przyjmuje tylko jedno połączenie lokalne naraz.
 
+## Aktualizacje
+
+* **Program** codziennie sprawdza w [Releases](../../releases), czy jest nowsza wersja. Możesz to wyłączyć w *Ustawienia → Aktualizacje*, a sprawdzić ręcznie przyciskiem *Sprawdź teraz*.
+  * Gdy jest nowsza wersja, u góry okna pojawia się przycisk **Zaktualizuj do X** (i powiadomienie w zasobniku).
+  * Po kliknięciu program pobiera nową wersję, sprawdza jej **sumę kontrolną SHA-256**, podmienia `TuyaChroma.exe` i uruchamia się ponownie. Żarówki na chwilę wracają do HA i są przejmowane z powrotem. Ustawienia, profile i żarówki zostają.
+* **Baza urządzeń Razer** (jak rozpoznawać urządzenia, układy klawiatur, uwagi) to plik [`data/razer_devices.json`](data/razer_devices.json) w repozytorium. Program codziennie pobiera jej nowszą wersję, także bez aktualizacji programu. Ręcznie zrobisz to przyciskiem *Urządzenia Razer → Aktualizuj bazę urządzeń*. Nowe modele Razer wystarczy dopisać do tego pliku.
+
 ## Rozwiązywanie problemów
 
 Logi znajdziesz w *Ustawienia → Otwórz folder z logami* (`%APPDATA%\TuyaChroma\log.txt`).

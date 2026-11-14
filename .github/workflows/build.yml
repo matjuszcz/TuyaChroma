@@ -30,6 +30,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest pytest-timeout pyinstaller==6.11.1
 
+      - name: Release version matches the program
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $v = python -c "import tuyachroma; print(tuyachroma.__version__)"
+          if ("v$v" -ne "${{ github.ref_name }}") { Write-Error "tag ${{ github.ref_name }} != version $v"; exit 1 }
+
       - name: Tests (incl. Windows shared memory, DPAPI and GUI)
         timeout-minutes: 5
         run: python -m pytest -v --timeout=60
@@ -42,6 +49,7 @@ jobs:
           pyinstaller --onefile --noconsole --name TuyaChroma --icon icon.ico
           --collect-submodules tinytuya --collect-submodules tuya_sharing
           --hidden-import pystray._win32 --hidden-import PIL.ImageTk
+          --add-data "data/razer_devices.json;data"
           TuyaChroma.py
 
       - name: Smoke test (start, keep running, log written)
@@ -55,6 +63,7 @@ jobs:
           Get-Content "$env:APPDATA\TuyaChroma\log.txt"
           if (-not (Select-String -Path "$env:APPDATA\TuyaChroma\log.txt" -Pattern "TuyaChroma .* starting")) { exit 1 }
           if (Select-String -Path "$env:APPDATA\TuyaChroma\log.txt" -Pattern "Traceback") { exit 1 }
+          if (-not (Select-String -Path "$env:APPDATA\TuyaChroma\log.txt" -Pattern "Razer device database version")) { exit 1 }
 
       - name: Package
         shell: pwsh
@@ -62,14 +71,21 @@ jobs:
           New-Item -ItemType Directory pkg | Out-Null
           Copy-Item dist/TuyaChroma.exe, README.md, NOTICE pkg/
           Compress-Archive -Path pkg/* -DestinationPath TuyaChroma-windows.zip
+          $hash = (Get-FileHash TuyaChroma-windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  TuyaChroma-windows.zip" | Out-File -Encoding ascii TuyaChroma-windows.zip.sha256
 
       - uses: actions/upload-artifact@v4
         with:
           name: TuyaChroma-windows
-          path: TuyaChroma-windows.zip
+          path: |
+            TuyaChroma-windows.zip
+            TuyaChroma-windows.zip.sha256
 
       - name: Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: TuyaChroma-windows.zip
+          files: |
+            TuyaChroma-windows.zip
+            TuyaChroma-windows.zip.sha256
+          generate_release_notes: true

@@ -13,6 +13,8 @@ import logging
 import re
 import sys
 
+from . import devices_db
+
 _LOGGER = logging.getLogger(__name__)
 
 RAZER_VID = "VID_1532"
@@ -26,29 +28,6 @@ CATEGORY_LABELS = {
     "chromalink": "Chroma Link",
     "controller": "Kontroler",
     "other": "Inne",
-}
-
-# (category, keywords) - first match wins; checked against the lower-case name
-_RULES: list[tuple[str, tuple[str, ...]]] = [
-    ("keypad", ("tartarus", "orbweaver", "nostromo")),
-    ("controller", ("wolverine", "kitsune", "raiju", "raion", "panthera", "atrox", "kishi", "sabertooth")),
-    ("headset", ("kraken", "blackshark", "barracuda", "nari", "tiamat", "thresher", "man o' war",
-                 "man o war", "electra", "hammerhead", "opus")),
-    ("mousepad", ("firefly", "goliathus", "strider", "base station", "mouse dock", "charging pad",
-                  "mouse bungee", "sphex", "acari", "gigantus")),
-    ("mouse", ("deathadder", "basilisk", "viper", "naga", "mamba", "lancehead", "cobra", "orochi",
-               "abyssus", "atheris", "pro click", "diamondback", "imperator", "ouroboros", "taipan",
-               "hyperspeed mouse", " mouse")),
-    ("keyboard", ("blackwidow", "huntsman", "ornata", "cynosa", "deathstalker", "turret", "blade",
-                  "book", "pro type", "anansi", "lycosa", " keyboard")),
-    ("chromalink", ("nommo", "leviathan", "seiren", "core x", "thunderbolt", "dock", "chroma argb",
-                    "argb controller", "addressable", "laptop stand", "cooling pad", "raptor",
-                    "kiyo", "aether", "iskur", "enki", "chroma hdk", "hdk")),
-]
-
-# Devices that don't take Chroma SDK effects at all (controlled by another app).
-NO_CHROMA_SDK = {
-    "wolverine v2 chroma": "bez Synapse – światło w aplikacji Razer Controller Setup",
 }
 
 # Chroma SDK category used for each detected type
@@ -72,9 +51,9 @@ class RazerDevice:
     @property
     def note(self) -> str:
         low = self.name.lower()
-        for key, text in NO_CHROMA_SDK.items():
-            if key in low:
-                return text
+        for entry in devices_db.load().get("notes", []):
+            if entry["match"] in low:
+                return entry["note"]
         if self.category in ("controller", "other"):
             return "przez Chroma Link, jeśli działa w Synapse"
         return ""
@@ -82,10 +61,14 @@ class RazerDevice:
 
 def categorize(name: str) -> str:
     low = f" {name.lower()} "
-    for category, words in _RULES:
-        if any(w in low for w in words):
-            return category
+    for rule in devices_db.load()["rules"]:
+        if any(w in low for w in rule["keywords"]):
+            return rule["category"]
     return "other"
+
+
+def _pid_info(pid: str) -> dict | None:
+    return devices_db.load().get("pids", {}).get(pid.upper()) if pid else None
 
 
 def _connection(instance_id: str, name: str) -> str:
@@ -131,6 +114,10 @@ def group_devices(entries: list[tuple[str, str]]) -> list[RazerDevice]:
             dev.connection = _connection(instance_id, pretty)
     devices = []
     for dev in by_key.values():
+        info = _pid_info(dev.pid)
+        if not dev.name and info is not None:  # Windows gave no name: use the database
+            dev.name = info.get("name") or ""
+            dev.category = info["category"]
         if not dev.name:
             dev.name = f"Urządzenie Razer (PID {dev.pid})"
         devices.append(dev)
@@ -222,8 +209,11 @@ def keyboard_layout(devices: list[RazerDevice]) -> str:
     names = [d.name.lower() for d in devices if d.category == "keyboard"]
     if not names:
         return "full"
-    if all("mini" in n for n in names):
+    layouts = devices_db.load().get("keyboard_layouts", {})
+    mini = layouts.get("mini", [])
+    small = mini + layouts.get("tkl", [])
+    if all(any(w in n for w in mini) for n in names):
         return "mini"
-    if all(("mini" in n) or ("tkl" in n) or ("tenkeyless" in n) for n in names):
+    if all(any(w in n for w in small) for n in names):
         return "tkl"
     return "full"
