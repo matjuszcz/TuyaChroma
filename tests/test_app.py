@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from types import SimpleNamespace
@@ -354,4 +353,48 @@ def test_minimize_and_close_go_to_tray(tmp_path, monkeypatch) -> None:
         assert app.root.state() == "withdrawn" and len(notes) == 1
         assert not app._quitting  # still running
     finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_gui_shows_login_error_and_validates_version(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import cloud, gui
+
+    class BadAccount:
+        def request_qr(self, code):
+            raise TuyaCloudError("USER_CODE_INVALID (kod 1106)")
+
+    monkeypatch.setattr(cloud, "TuyaAccount", BadAccount)
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    config = AppConfig(devices=[dev("a")])
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    try:
+        app.user_code_var.set("WRONG")
+        app.start_login()
+        deadline = time.time() + 5
+        while time.time() < deadline and "Błąd" not in app.login_var.get():
+            app.root.update()
+            time.sleep(0.02)
+        assert "USER_CODE_INVALID" in app.login_var.get()
+
+        # a callback that raises must not stop the UI loop
+        app._queue.put(lambda: 1 / 0)
+        app._queue.put(lambda: app.set_busy("still alive"))
+        deadline = time.time() + 3
+        while time.time() < deadline and app.busy_var.get() != "still alive":
+            app.root.update()
+            time.sleep(0.02)
+        assert app.busy_var.get() == "still alive"
+
+        app.tree.selection_set("a")
+        app._load_editor()
+        app.ed_version.set("3,4")
+        app.save_editor()
+        assert config.devices[0].version == "3.4"
+        app.ed_version.set("abc")
+        app.save_editor()
+        assert config.devices[0].version == ""
+    finally:
+        service.stop()
         app.root.destroy()

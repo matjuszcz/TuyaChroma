@@ -59,8 +59,10 @@ class App:
 
         self.root = tk.Tk()
         self.root.title("TuyaChroma")
-        self.root.geometry("900x600")
-        self.root.minsize(760, 480)
+        # Sizes below are for 100% scaling; grow them on high-DPI screens.
+        self.scale = max(1.0, self.root.winfo_fpixels("1i") / 96)
+        self.root.geometry(f"{self.px(900)}x{self.px(600)}")
+        self.root.minsize(self.px(760), self.px(480))
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         # Windows is shutting down / logging off: give the bulbs back right away
         # (Tk may end the process before the system event thread gets its turn).
@@ -78,6 +80,9 @@ class App:
 
     # ----------------------------------------------------------- utilities
 
+    def px(self, value: int) -> int:
+        return int(value * self.scale)
+
     def run_bg(self, func: Callable[[], Any], done: Callable[[Any], None] | None = None,
                error: Callable[[Exception], None] | None = None) -> None:
         """Run func in a thread; deliver the result on the Tk thread."""
@@ -88,21 +93,28 @@ class App:
             except Exception as err:  # noqa: BLE001
                 _LOGGER.exception("Background task failed")
                 if error:
-                    self._queue.put(lambda: error(err))
+                    # bind now: Python deletes `err` when the except block ends
+                    self._queue.put(lambda e=err: error(e))
                 return
             if done:
-                self._queue.put(lambda: done(result))
+                self._queue.put(lambda r=result: done(r))
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _pump(self) -> None:
-        while True:
-            try:
-                callback = self._queue.get_nowait()
-            except queue.Empty:
-                break
-            callback()
-        self.root.after(100, self._pump)
+        try:
+            while True:
+                try:
+                    callback = self._queue.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    callback()
+                except Exception:  # noqa: BLE001 - keep the window alive
+                    _LOGGER.exception("UI callback failed")
+        finally:
+            if not self._quitting:
+                self.root.after(100, self._pump)
 
     def save_and_apply(self) -> None:
         save(self.config)
@@ -159,7 +171,7 @@ class App:
             ("source", "Źródło", 110), ("zone", "Strefa", 100), ("status", "Stan", 220),
         ):
             self.tree.heading(col, text=title)
-            self.tree.column(col, width=width, anchor="center" if col in ("on", "version") else "w")
+            self.tree.column(col, width=self.px(width), anchor="center" if col in ("on", "version") else "w")
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._load_editor())
@@ -321,7 +333,8 @@ class App:
         dev.source = _label_to_key(SOURCE_LABELS, self.ed_source.get())
         dev.zone = _label_to_key(ZONE_LABELS, self.ed_zone.get())
         dev.ip = self.ed_ip.get().strip()
-        dev.version = self.ed_version.get().strip()
+        version = self.ed_version.get().strip().replace(",", ".")
+        dev.version = version if version in ("3.1", "3.2", "3.3", "3.4", "3.5") else ""
         dev.brightness = round(self.ed_brightness.get()) / 100
         dev.method = _label_to_key(METHOD_LABELS, self.ed_method.get()) or "colour"
         if dev.method not in METHOD_LABELS:
@@ -387,7 +400,7 @@ class App:
                 if bulb.dpset.get(k) and original.get(k) is not None
             })
             bulb.close()
-            return f"{dev.name}: OK (protokół {version}, tryb music: {'tak' if bulb.dpset.get('music') else 'nie'})"
+            return f"{dev.name}: OK (protokół {version})"
         finally:
             save(self.config)
             if was_running:

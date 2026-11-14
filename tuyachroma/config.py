@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import threading
 from typing import Any
 
 from . import dpapi
@@ -167,6 +168,7 @@ def save(config: AppConfig, path: Path | None = None) -> None:
         "settings": asdict(config.settings),
         "devices": devices,
     }
-    tmp = path.with_suffix(".tmp")
+    # unique temp name: saves may happen from the UI and a worker thread at once
+    tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)

@@ -52,9 +52,14 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
     if not winsys.acquire_single_instance():
+        import tkinter as tk  # noqa: PLC0415
         from tkinter import messagebox  # noqa: PLC0415
 
-        messagebox.showinfo("TuyaChroma", "TuyaChroma już działa – ikona jest w zasobniku obok zegara.")
+        root = tk.Tk()
+        root.withdraw()  # no empty window behind the message
+        messagebox.showinfo("TuyaChroma", "TuyaChroma już działa – ikona jest w zasobniku obok zegara.",
+                            parent=root)
+        root.destroy()
         return 0
 
     config = load()
