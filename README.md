@@ -2,7 +2,11 @@
 
 Program na Windows, który łączy **żarówki RGB Tuya** z **Razer Chroma**: gdy gra wysyła efekty Razer Chroma, wybrane żarówki w pokoju świecą tymi samymi kolorami.
 
-Na co dzień żarówki dalej działają z **Home Assistant**. Gdy włączasz komputer, program startuje razem z Windows i **przejmuje wybrane żarówki na czas efektów z gier**. Potem **oddaje je w stanie sprzed przejęcia**.
+Na co dzień żarówki dalej działają z **Home Assistant** (albo z aplikacji Tuya). Gdy włączasz komputer, program startuje razem z Windows i **przejmuje wybrane żarówki, dopóki działa Razer Synapse**:
+
+* **w grze z Razer Chroma** żarówki pokazują kolory z gry;
+* **bez gry** odtwarzają wybrany efekt, np. **Wave** jak w Twoim profilu Synapse;
+* **po wyłączeniu komputera** (albo zamknięciu Synapse lub programu) **wracają do stanu sprzed przejęcia** i dalej działają z HA.
 
 ## Jak to działa
 
@@ -15,16 +19,21 @@ Gra z Razer Chroma ─► Razer Synapse (Chroma SDK) ─► TuyaChroma ─► ż
 * **Logowanie kontem Tuya / Smart Life jako zwykły użytkownik.** Wpisujesz kod użytkownika z aplikacji i skanujesz kod QR. Program pobiera listę żarówek i ich klucze lokalne, a potem sam znajduje je w sieci (adres IP i wersję protokołu).
 * **Wybierasz żarówki**, którymi ma sterować Razer, oraz dla każdej źródło koloru (klawiatura, mysz, Chroma Link…) i strefę (np. lewa strona klawiatury).
 * **Kolory z gier** program odczytuje z usługi Razer Chroma SDK (tak samo jak [Artemis RGB](https://artemis-rgb.com/)) i wysyła do żarówek **lokalnie** (bez chmury, kilka razy na sekundę).
+* **Efekt poza grą:** gdy Razer działa, a żadna gra nie wysyła efektów, program odtwarza na żarówkach wybrany efekt:
+  * **Wave**: fala tęczy przechodząca kolejno przez żarówki;
+  * **Spectrum**: wszystkie żarówki razem zmieniają kolory;
+  * **Oddychanie**: pulsujący kolor;
+  * **Stały kolor**.
 * **Przejęcie i oddanie:**
-  * gdy gra zaczyna efekt, program zapamiętuje aktualny stan żarówki (ustawiony np. w HA) i przejmuje ją;
-  * gdy gra kończy efekt, wstrzymasz sterowanie, zamkniesz program, uśpisz lub wyłączysz komputer, żarówka **wraca do zapamiętanego stanu** i dalej działa z HA.
+  * przy przejęciu program zapamiętuje aktualny stan żarówki (ustawiony np. w HA albo w aplikacji Tuya);
+  * gdy wyłączysz lub uśpisz komputer, zamkniesz Synapse lub program albo wstrzymasz sterowanie, żarówka **wraca do zapamiętanego stanu** i dalej działa z HA.
 
 ### Co jest przechwytywane
 
 | Źródło | Działa? |
 |---|---|
 | Gry i aplikacje z Razer Chroma (Chroma SDK), np. efekty reagujące na rozgrywkę | ✅ |
-| Efekty z profilu Synapse / Chroma Studio (fala, spectrum itp. poza grą) | ❌ Synapse udostępnia je tylko aplikacjom z oficjalnym Razer App ID. Poza grą żarówki wracają do stanu z HA. |
+| Efekty z profilu Synapse / Chroma Studio (wave, spectrum itp. poza grą) | ❌ nie da się ich odczytać: Synapse udostępnia je tylko aplikacjom z oficjalnym Razer App ID. Zamiast tego program sam odtwarza **podobny efekt**, który wybierasz w *Ustawieniach*. Nie zmienia się on sam po zmianie profilu w Synapse. |
 
 ## Wymagania
 
@@ -73,14 +82,17 @@ Wskazówki:
 
 * **Uruchamiaj razem z Windows** (domyślnie włączone): program startuje po zalogowaniu do Windows od razu w zasobniku, bez otwierania okna, i przejmuje wybrane żarówki, gdy gra wyśle efekt. Wpis autostartu znajdziesz też w *Menedżer zadań → Aplikacje autostartu* jako „TuyaChroma”.
 * **Startuj zminimalizowany do zasobnika**: przy autostarcie okno się nie otwiera. Wyłącz, jeśli wolisz widzieć okno po starcie.
-* **Gdy żadna gra nie wysyła efektów:** *wróć do stanu sprzed przejęcia* (domyślnie, czyli sterowanie z HA) albo *zostaw ostatni kolor z gry*.
+* **Gdy Razer działa, ale żadna gra nie wysyła efektów:**
+  * *Odtwarzaj efekt* (domyślnie Wave). Wybierz efekt podobny do profilu w Synapse oraz kolor (dla oddychania i stałego koloru), szybkość i jasność;
+  * *Oddaj żarówki do HA*: poza grą żarówki działają z HA;
+  * *Zostaw ostatni kolor z gry*.
 
 ## Na co dzień
 
 * Program działa w **zasobniku** (zielona ikona obok zegara). Zarówno minimalizacja (**_**), jak i zamknięcie okna (**X**) chowają je do zasobnika. Program działa wtedy dalej. Całkowicie zamyka go dopiero *Zakończ* w menu ikony.
 * Jeśli ikona jest ukryta pod strzałką **^** obok zegara, przeciągnij ją na pasek, żeby była zawsze widoczna.
 * Menu ikony: **Otwórz**, **Wstrzymaj sterowanie** (żarówki od razu wracają do HA) albo **Włącz sterowanie**, **Zakończ**.
-* Kropka w oknie programu: 🟢 efekt z gry jest aktywny, 🔵 program czeka na grę, 🟡 wymaga uwagi (np. Synapse nie działa albo nie wybrano żarówek).
+* Kropka w oknie programu: 🟢 efekt z gry jest aktywny, 🔵 Razer działa (odtwarzany jest efekt albo program czeka na grę), 🟡 wymaga uwagi (np. Synapse nie działa albo nie wybrano żarówek).
 
 ## Uwagi o Home Assistant
 

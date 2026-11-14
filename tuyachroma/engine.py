@@ -10,6 +10,7 @@ import time
 from .bulbs import BulbConfig, BulbWorker
 from .colors import adjust, reduce_colors, zone_indices
 from .config import AppConfig
+from .effects import EffectSettings, effect_color
 from .razer import ChromaReader, Frame, RazerUnavailable, razer_service_running
 
 SERVICE_CHECK_INTERVAL = 3.0
@@ -24,14 +25,29 @@ def bulb_color(cfg: BulbConfig, frame: Frame) -> tuple[int, int, int]:
     return adjust(reduce_colors(leds, cfg.mode), cfg.brightness, cfg.min_brightness)
 
 
-def dispatch(workers: list, frames: dict[str, Frame | None], idle: str) -> bool:
-    """Send frame colors to workers. Returns True if any game effect is active."""
+def dispatch(
+    workers: list,
+    frames: dict[str, Frame | None],
+    idle: str,
+    fx: EffectSettings | None = None,
+    now: float | None = None,
+) -> bool:
+    """Send colors to workers. Returns True if any game effect is active.
+
+    Game colors win. Bulbs without a game effect follow ``idle``: play the
+    ambient effect, give the bulb back (restore), or keep the last color.
+    """
     active = False
-    for worker in workers:
+    now = time.monotonic() if now is None else now
+    count = len(workers)
+    for index, worker in enumerate(workers):
         frame = frames.get(worker.cfg.source)
         if frame is not None and frame.active:
             worker.set_color(bulb_color(worker.cfg, frame))
             active = True
+        elif idle == "effect" and fx is not None:
+            rgb = effect_color(fx, now, index, count)
+            worker.set_color(adjust(rgb, worker.cfg.brightness, worker.cfg.min_brightness))
         elif idle == "restore":
             worker.release()
     return active
@@ -70,7 +86,8 @@ class SyncService:
             self._stop.clear()
             sources = sorted({w.cfg.source for w in self.workers})
             self._thread = threading.Thread(
-                target=self._run, args=(sources, config.settings.fps, config.settings.idle),
+                target=self._run,
+                args=(sources, config.settings.fps, config.settings.idle, config.settings.effect),
                 name="razer-reader", daemon=True,
             )
             self._thread.start()
@@ -103,7 +120,7 @@ class SyncService:
 
     # ---------------------------------------------------------------- thread
 
-    def _run(self, sources: list[str], fps: float, idle: str) -> None:
+    def _run(self, sources: list[str], fps: float, idle: str, fx: EffectSettings) -> None:
         if not sources:
             self.razer_status = "nie wybrano żadnej żarówki"
             return
@@ -146,10 +163,13 @@ class SyncService:
                     reader.close()
                     reader = None
                     continue
-                self.game_active = dispatch(self.workers, frames, idle)
-                self.razer_status = (
-                    "efekt z gry aktywny" if self.game_active else "połączono, czekam na grę"
-                )
+                self.game_active = dispatch(self.workers, frames, idle, fx)
+                if self.game_active:
+                    self.razer_status = "efekt z gry aktywny"
+                elif idle == "effect":
+                    self.razer_status = "brak gry – odtwarzam efekt"
+                else:
+                    self.razer_status = "połączono, czekam na grę"
                 spent = time.monotonic() - started
                 if spent < period:
                     self._stop.wait(period - spent)

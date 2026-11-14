@@ -12,13 +12,14 @@ from typing import Any
 
 from . import dpapi
 from .bulbs import BulbConfig
+from .effects import EFFECTS, EffectSettings
 from .razer import DEVICES
 
 _LOGGER = logging.getLogger(__name__)
 
 SOURCES = list(DEVICES)
 ZONES = ["all", "left", "center", "right", "top", "bottom"]
-IDLE_MODES = ["restore", "keep"]
+IDLE_MODES = ["effect", "restore", "keep"]
 
 
 @dataclass
@@ -63,7 +64,10 @@ class Device:
 class Settings:
     autostart: bool = True
     start_minimized: bool = True
-    idle: str = "restore"
+    # When Razer runs but no game sends Chroma effects:
+    # effect = play an ambient effect, restore = give bulbs back, keep = last game color
+    idle: str = "effect"
+    effect: EffectSettings = field(default_factory=EffectSettings)
     fps: float = 20
     sync_enabled: bool = True
 
@@ -143,11 +147,17 @@ def load(path: Path | None = None) -> AppConfig:
             devices.append(Device.from_dict(raw))
         except (OSError, TypeError, ValueError) as err:
             _LOGGER.warning("Skipping device %s: %s", raw.get("id"), err)
-    s = data.get("settings", {})
+    s = dict(data.get("settings", {}))
+    fx = s.pop("effect", None)
     names = {f.name for f in fields(Settings)}
     settings = Settings(**{k: v for k, v in s.items() if k in names})
+    if isinstance(fx, dict):
+        fx_names = {f.name for f in fields(EffectSettings)}
+        settings.effect = EffectSettings(**{k: v for k, v in fx.items() if k in fx_names})
     if settings.idle not in IDLE_MODES:
-        settings.idle = "restore"
+        settings.idle = "effect"
+    if settings.effect.effect not in EFFECTS:
+        settings.effect.effect = "wave"
     return AppConfig(
         devices=devices, settings=settings,
         username=data.get("username", ""), user_code=data.get("user_code", ""),

@@ -398,3 +398,67 @@ def test_gui_shows_login_error_and_validates_version(tmp_path, monkeypatch) -> N
     finally:
         service.stop()
         app.root.destroy()
+
+
+def test_effect_when_razer_runs_without_game() -> None:
+    from tuyachroma.effects import EffectSettings
+
+    a = Recorder(dev("a", min_brightness=0).bulb_config())
+    b = Recorder(dev("b", min_brightness=0).bulb_config())
+    idle_frame = {"keyboard": Frame("keyboard", 13, None, 1)}  # Synapse running, no game
+    fx = EffectSettings(effect="wave", period=8)
+    assert not dispatch([a, b], idle_frame, "effect", fx, now=0.0)
+    assert a.calls[-1] != b.calls[-1] and max(a.calls[-1]) > 200  # wave across bulbs
+    # a game starts: its colors win over the effect
+    game = {"keyboard": Frame("keyboard", 6, [(0, 0, 255)] * 132, 2)}
+    assert dispatch([a, b], game, "effect", fx, now=1.0)
+    assert a.calls[-1] == (0, 0, 255) == b.calls[-1]
+
+
+def test_effect_mode_service_and_return_to_ha(monkeypatch) -> None:
+    from tuyachroma import engine
+
+    monkeypatch.setattr(engine, "SERVICE_CHECK_INTERVAL", 0.05)
+
+    class IdleReader(FakeReader):
+        def read(self, src):
+            return Frame(src, 13, None, 5)  # no game
+
+    alive = {"v": True}
+
+    def reader_factory(sources):
+        if not alive["v"]:
+            raise RazerUnavailable("RzSDKService nie działa")
+        return IdleReader(sources)
+
+    workers = []
+
+    def worker_factory(cfg):
+        workers.append(Recorder(cfg))
+        return workers[-1]
+
+    service = SyncService(reader_factory=reader_factory, worker_factory=worker_factory,
+                          service_check=lambda: alive["v"])
+    config = AppConfig(devices=[dev("a", enabled=True)])
+    assert config.settings.idle == "effect" and config.settings.effect.effect == "wave"
+    service.start(config)
+    deadline = time.time() + 2
+    while time.time() < deadline and not workers[0].calls:
+        time.sleep(0.01)
+    assert isinstance(workers[0].calls[0], tuple)  # bulb shows the wave
+    assert "efekt" in service.razer_status and not service.game_active
+    alive["v"] = False  # computer shutting down / Synapse closed
+    deadline = time.time() + 2
+    while time.time() < deadline and workers[0].calls[-1] != "release":
+        time.sleep(0.01)
+    assert workers[0].calls[-1] == "release"  # back to Home Assistant
+    service.stop()
+
+
+def test_effect_settings_roundtrip(tmp_path) -> None:
+    config = AppConfig()
+    config.settings.effect.effect = "breathing"
+    config.settings.effect.color = "#ff0000"
+    config.settings.effect.period = 3.0
+    save(config, tmp_path / "c.json")
+    assert load(tmp_path / "c.json").settings.effect == config.settings.effect

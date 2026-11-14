@@ -11,12 +11,13 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import colorchooser, messagebox, ttk
 from typing import Any
 
 from . import __version__, winsys
 from .bulbs import probe_version
 from .config import IDLE_MODES, SOURCES, ZONES, AppConfig, Device, config_dir, save
+from .effects import EFFECTS
 from .engine import SyncService
 from .scan import scan
 
@@ -31,8 +32,15 @@ ZONE_LABELS = {
     "top": "Góra", "bottom": "Dół",
 }
 IDLE_LABELS = {
-    "restore": "Wróć do stanu sprzed przejęcia (sterowanie z HA)",
+    "effect": "Odtwarzaj efekt (jak profil w Synapse)",
+    "restore": "Oddaj żarówki do HA (stan sprzed przejęcia)",
     "keep": "Zostaw ostatni kolor z gry",
+}
+EFFECT_LABELS = {
+    "wave": "Wave – fala tęczy przez żarówki",
+    "spectrum": "Spectrum – wszystkie zmieniają kolory razem",
+    "breathing": "Oddychanie – pulsujący kolor",
+    "static": "Stały kolor",
 }
 METHOD_LABELS = {
     "colour": "Kolor (zalecany)",
@@ -61,7 +69,9 @@ class App:
         self.root.title("TuyaChroma")
         # Sizes below are for 100% scaling; grow them on high-DPI screens.
         self.scale = max(1.0, self.root.winfo_fpixels("1i") / 96)
-        self.root.geometry(f"{self.px(900)}x{self.px(600)}")
+        width = min(self.px(900), self.root.winfo_screenwidth() - 40)
+        height = min(self.px(600), self.root.winfo_screenheight() - 80)
+        self.root.geometry(f"{width}x{height}")
         self.root.minsize(self.px(760), self.px(480))
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         # Windows is shutting down / logging off: give the bulbs back right away
@@ -245,21 +255,41 @@ class App:
         self.set_minimized = tk.BooleanVar(value=s.start_minimized)
         self.set_idle = tk.StringVar(value=s.idle)
         self.set_fps = tk.IntVar(value=int(s.fps))
+        self.fx_effect = tk.StringVar(value=EFFECT_LABELS.get(s.effect.effect, EFFECT_LABELS["wave"]))
+        self.fx_color = s.effect.color
+        self.fx_period = tk.DoubleVar(value=s.effect.period)
+        self.fx_brightness = tk.DoubleVar(value=round(s.effect.brightness * 100))
         ttk.Checkbutton(tab, text="Uruchamiaj razem z Windows (przejmuj żarówki po włączeniu komputera)",
                         variable=self.set_autostart).pack(anchor="w")
         ttk.Checkbutton(tab, text="Startuj zminimalizowany do zasobnika (obok zegara)",
                         variable=self.set_minimized).pack(anchor="w", pady=(4, 12))
-        ttk.Label(tab, text="Gdy żadna gra nie wysyła efektów Razer Chroma:").pack(anchor="w")
+        ttk.Label(tab, text="Gdy Razer działa, ale żadna gra nie wysyła efektów Chroma:").pack(anchor="w")
         for mode in IDLE_MODES:
             ttk.Radiobutton(tab, text=IDLE_LABELS[mode], value=mode, variable=self.set_idle).pack(anchor="w", padx=12)
+        fx = ttk.Frame(tab)
+        fx.pack(anchor="w", padx=36, pady=(4, 0))
+        ttk.Label(fx, text="Efekt:").grid(row=0, column=0, sticky="e")
+        ttk.Combobox(fx, textvariable=self.fx_effect, state="readonly", width=42,
+                     values=[EFFECT_LABELS[e] for e in EFFECTS]).grid(row=0, column=1, columnspan=3, sticky="w", padx=6)
+        ttk.Label(fx, text="Kolor:").grid(row=1, column=0, sticky="e", pady=(6, 0))
+        self.fx_swatch = tk.Label(fx, width=4, background=self.fx_color, relief="groove")
+        self.fx_swatch.grid(row=1, column=1, sticky="w", padx=6, pady=(6, 0))
+        ttk.Button(fx, text="Wybierz…", command=self.pick_effect_color).grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Label(fx, text="(oddychanie i stały kolor)", foreground="#666").grid(row=1, column=3, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(fx, text="Szybkość (s na cykl):").grid(row=2, column=0, sticky="e", pady=(6, 0))
+        ttk.Spinbox(fx, from_=2, to=60, increment=1, textvariable=self.fx_period, width=5).grid(row=2, column=1, sticky="w", padx=6, pady=(6, 0))
+        ttk.Label(fx, text="Jasność %:").grid(row=3, column=0, sticky="e", pady=(6, 0))
+        ttk.Scale(fx, from_=10, to=100, variable=self.fx_brightness, length=160).grid(row=3, column=1, columnspan=2, sticky="w", padx=6, pady=(6, 0))
         row = ttk.Frame(tab)
         row.pack(anchor="w", pady=(12, 0))
         ttk.Label(row, text="Odczyty Razer na sekundę:").pack(side="left")
         ttk.Spinbox(row, from_=5, to=60, textvariable=self.set_fps, width=5).pack(side="left", padx=6)
         ttk.Label(
             tab, foreground="#666", wraplength=780, justify="left",
-            text=("Po wyłączeniu komputera, uśpieniu, wstrzymaniu sterowania lub zamknięciu programu "
-                  "żarówki wracają do stanu sprzed przejęcia i dalej działają z Home Assistant."),
+            text=("Efekty z profilu Synapse nie są dostępne dla innych programów, dlatego wybierz tu efekt "
+                  "podobny do ustawionego w Synapse. Kolory z gry zawsze mają pierwszeństwo.\n"
+                  "Po wyłączeniu komputera, uśpieniu, zamknięciu Synapse lub programu albo wstrzymaniu "
+                  "sterowania żarówki wracają do stanu sprzed przejęcia i dalej działają z Home Assistant."),
         ).pack(anchor="w", pady=(16, 0))
         row = ttk.Frame(tab)
         row.pack(anchor="w", pady=(16, 0))
@@ -492,12 +522,28 @@ class App:
             s.fps = max(5, min(60, int(self.set_fps.get())))
         except (tk.TclError, ValueError):
             s.fps = 20
+        s.effect.effect = _label_to_key(EFFECT_LABELS, self.fx_effect.get())
+        if s.effect.effect not in EFFECTS:
+            s.effect.effect = "wave"
+        s.effect.color = self.fx_color
+        try:
+            s.effect.period = max(2.0, min(60.0, float(self.fx_period.get())))
+        except (tk.TclError, ValueError):
+            s.effect.period = 8.0
+        s.effect.brightness = max(0.1, min(1.0, round(self.fx_brightness.get()) / 100))
         try:
             winsys.set_autostart(s.autostart, s.start_minimized)
         except OSError as err:
             messagebox.showwarning("TuyaChroma", f"Nie udało się ustawić autostartu: {err}")
         self.save_and_apply()
         self.set_busy("Zapisano ustawienia.")
+
+    def pick_effect_color(self) -> None:
+        _rgb, hex_color = colorchooser.askcolor(color=self.fx_color, parent=self.root,
+                                                title="Kolor efektu")
+        if hex_color:
+            self.fx_color = hex_color
+            self.fx_swatch.configure(background=hex_color)
 
     def open_logs(self) -> None:
         path = config_dir()
@@ -526,9 +572,14 @@ class App:
         elif not self.config.enabled_devices:
             text, color = "Wybierz żarówki w zakładce „Żarówki”", "#e0a000"
         else:
-            text = f"Razer: {self.service.razer_status}"
-            color = RAZER_GREEN if self.service.game_active else (
-                "#2b7de9" if "połączono" in self.service.razer_status else "#e0a000")
+            status = self.service.razer_status
+            text = f"Razer: {status}"
+            if self.service.game_active:
+                color = RAZER_GREEN
+            elif "efekt" in status or "połączono" in status:
+                color = "#2b7de9"
+            else:
+                color = "#e0a000"
         self.status_var.set(text)
         self.dot.delete("all")
         self.dot.create_oval(2, 2, 12, 12, fill=color, outline=color)
