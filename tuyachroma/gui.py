@@ -881,7 +881,7 @@ class App:
 
     RESCAN_AFTER = 60.0     # a bulb unreachable this long ...
     RESCAN_EVERY = 300.0    # ... triggers a network search, at most this often
-    RESCAN_IDLE = 1800.0    # not found = switched off: search only every 30 min
+    RESCAN_IDLE = 600.0     # not found = switched off: search every 10 min
 
     def _watch_unreachable(self) -> None:
         if self._quitting:

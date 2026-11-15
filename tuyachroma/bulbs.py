@@ -31,7 +31,7 @@ STATUS_OFFLINE = "wyłączona / poza siecią"
 # out of Wi-Fi range, or a new IP address)
 OFFLINE_ERRORS = {"901", "905"}
 RETRY_FIRST = 5.0
-RETRY_MAX = 60.0  # seconds between connection attempts to an unreachable bulb
+RETRY_MAX = 15.0  # seconds between connection attempts to an unreachable bulb
 
 
 class UnsupportedBulb(Exception):
@@ -157,8 +157,8 @@ class BulbWorker(threading.Thread):
                     _LOGGER.debug("%s: %s", self.cfg.name, err)
                 self.status = STATUS_OFFLINE if offline else f"błąd: {err}"
                 self._disconnect()
-                # 5 s, 10 s, 20 s, 40 s, then every minute: a switched-off bulb
-                # costs nothing, and one that comes back is found within a minute.
+                # 5 s, 10 s, then every 15 s: a switched-off bulb
+                # costs nothing, and one switched on is taken over ~15 s after it joins Wi-Fi.
                 self._stopping.wait(min(RETRY_FIRST * 2 ** (failures - 1), RETRY_MAX))
         try:
             if self._in_sync_mode:
