@@ -39,7 +39,17 @@ class EffectPlayer(threading.Thread):
         # A game runs: let go of the Chroma SDK so the game gets the Razer devices
         # (otherwise Synapse may keep showing our effect instead of the game's).
         self.yielded = False
+        self._reconnect = False
+        self.init_error = ""
         self.output_status = "—" if output_factory is None else "łączenie z Chroma SDK…"
+
+    @property
+    def output_ready(self) -> bool:
+        return self._output is not None
+
+    def reconnect(self) -> None:
+        """Close and open the Chroma SDK again (Synapse kept its own profile)."""
+        self._reconnect = True
 
     def latest(self) -> tuple[dict[str, list[RGB]], list[RGB]]:
         with self._lock:
@@ -66,11 +76,21 @@ class EffectPlayer(threading.Thread):
                         _LOGGER.info("Razer devices handed over to the game")
                     self.output_status = "urządzenia Razer: steruje gra"
                 elif self._factory is not None:
+                    if self._reconnect:
+                        self._reconnect = False
+                        if self._output is not None:
+                            self._output.close()
+                            self._output = None
+                        next_try = 0.0
                     if self._output is None and started >= next_try:
                         try:
                             self._output = self._factory()
                             self.output_status = "urządzenia Razer: efekt z programu"
+                            self.init_error = ""
                         except RazerUnavailable as err:
+                            if str(err) != self.init_error:
+                                _LOGGER.warning("Razer devices: %s (retrying every 5 s)", err)
+                            self.init_error = str(err)
                             self.output_status = f"Chroma SDK niedostępne: {err}"
                             next_try = started + 5
                     if self._output is not None:

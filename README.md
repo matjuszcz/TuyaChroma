@@ -213,6 +213,7 @@ Program sam naprawia to, co da się naprawić bez Ciebie:
 | Wątek światła albo synchronizacji zatrzymał się przez błąd | strażnik (co 30 s) uruchamia go ponownie |
 | Błąd w pętli synchronizacji | oddaje światła, po 5 s wznawia synchronizację |
 | Gra przejęła urządzenia Razer / aplikacja w tle | oddaje je grze; aplikację bez efektów po minucie pomija |
+| Po grze urządzenia Razer zostają przy profilu Synapse | po 3 s łączy się z Razer Chroma od nowa (do 5 razy co 5 s); jeśli nie pomoże – podpowiada, co sprawdzić w Synapse |
 | Logowanie do konta Tuya | odnawia je co 30 min |
 | Okno nie startuje (Tcl nie gotowy) | próbuje jeszcze dwa razy |
 

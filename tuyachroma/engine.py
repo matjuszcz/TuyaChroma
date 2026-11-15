@@ -149,7 +149,13 @@ class AliveCache:
 # ~0.7 s) is held: the lights keep the game's last colors instead of
 # flickering to the program's profile and back.
 GAME_HOLD = 2.0
-GAME_PROBATION = 60.0  # games may show effects only after loading
+GAME_PROBATION = 60.0
+# Full sync: after a game the Razer devices must show our effect again. If
+# Synapse keeps its own profile (current app not us) this long, the Chroma SDK
+# is opened again - every RECLAIM_EVERY s, at most RECLAIM_TRIES times.
+RECLAIM_AFTER = 3.0
+RECLAIM_EVERY = 5.0
+RECLAIM_TRIES = 5  # games may show effects only after loading
 
 
 def is_game_active(frames: dict[str, Frame | None], apps: ChromaApps | None,
@@ -348,6 +354,7 @@ class SyncService:
         self.game_active = False
         self.game_name = ""
         self.other_apps: dict[int, str] = {}  # running Chroma apps treated as games
+        self.razer_kept_by_synapse = False  # Synapse didn't give the devices back
         self._profile: Profile | None = None
         self._sources: list[str] = []
         # Workers still giving their bulb back after a stop/update. A new
@@ -668,6 +675,9 @@ class SyncService:
         on_trial: dict[int, float] = {}   # pid -> when we handed it the devices
         background: set[int] = set()      # Chroma apps that never showed an effect
         self.other_apps = {}
+        not_ours_since: float | None = None
+        last_reclaim = 0.0
+        reclaim_tries = 0
         try:
             while not self._stop.is_set():
                 try:
@@ -754,6 +764,32 @@ class SyncService:
                     self.game_active = raw_game or now - game_seen < GAME_HOLD
                     self.game_name = (apps.current_name if raw_game and apps else held_name) \
                         if self.game_active else ""
+                    player = self.player
+                    if (full_sync and player is not None and apps is not None and not raw_game
+                            and not player.yielded and getattr(player, "output_ready", False)):
+                        if apps.current_pid == self._own_pid:
+                            if reclaim_tries:
+                                _LOGGER.info("Razer devices show the program's effect again")
+                            not_ours_since, reclaim_tries = None, 0
+                            self.razer_kept_by_synapse = False
+                        elif not_ours_since is None:
+                            not_ours_since = now
+                        elif (now - not_ours_since > RECLAIM_AFTER and now - last_reclaim > RECLAIM_EVERY
+                              and reclaim_tries < RECLAIM_TRIES):
+                            reclaim_tries += 1
+                            last_reclaim = now
+                            _LOGGER.warning(
+                                "Synapse shows %s instead of the program's effect - reconnecting the "
+                                "Chroma SDK (%d/%d)",
+                                f"{apps.current_name} ({apps.current_pid})" if apps.current_pid
+                                else "its own profile", reclaim_tries, RECLAIM_TRIES)
+                            player.reconnect()
+                            if reclaim_tries == RECLAIM_TRIES:
+                                self.razer_kept_by_synapse = True
+                                _LOGGER.warning("Razer devices stay on the Synapse profile: in Synapse "
+                                                "check Chroma > Chroma Apps (TuyaChroma allowed, on top)")
+                    else:
+                        not_ours_since = None
                     if self.game_active != was_game:
                         was_game = self.game_active
                         if self.game_active:
@@ -813,6 +849,9 @@ class SyncService:
             return f"efekt z gry aktywny{name}"
         if idle == "full":
             player = self.player
+            if getattr(self, "razer_kept_by_synapse", False):
+                return ("urządzenia Razer zostały przy profilu Synapse – w Synapse: Chroma → "
+                        "Aplikacje Chroma, zezwól TuyaChroma")
             if player is not None and player.yielded:
                 names = ", ".join(getattr(self, "other_apps", {}).values())
                 return f"gra działa ({names}) – urządzenia Razer oddane grze"

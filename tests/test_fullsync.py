@@ -806,3 +806,71 @@ def test_ambient_lights_show_their_part_of_the_screen() -> None:
     right = _Light(9, source="keyboard", zone="right")
     rgb = service._bulb_effect_color(right, 0, 3, settings, renderer.profile)
     assert max(range(3), key=lambda c: rgb[c]) == 2
+
+
+def test_razer_devices_are_reclaimed_after_a_game(monkeypatch, caplog) -> None:
+    """1.9.24 log (Battlefield 6): after the game the SDK was opened again, but the
+    devices stayed on the Synapse profile."""
+    from tuyachroma import winsys
+
+    monkeypatch.setattr(engine, "RECLAIM_AFTER", 0.1)
+    monkeypatch.setattr(engine, "RECLAIM_EVERY", 0.2)
+    monkeypatch.setattr(engine, "GAME_HOLD", 0.1)
+    state = {"current": OWN, "game": False}
+    monkeypatch.setattr(winsys, "process_alive", lambda pid: pid == 26332 and state["game"])
+    dll = FakeDll()
+
+    class Reader:
+        def __init__(self, sources):
+            pass
+
+        def wait(self, ms):
+            time.sleep(0.005)
+
+        def read(self, src):
+            return Frame(src, 7, [(1, 1, 1)] * DEVICES[src].count, 1)
+
+        def read_apps(self):
+            apps = {OWN: "TuyaChroma.exe"}
+            if state["game"]:
+                apps[26332] = "bf6.exe"
+            return ChromaApps(current_pid=state["current"], apps=apps)
+
+        def close(self):
+            pass
+
+    service = engine.SyncService(
+        reader_factory=Reader, worker_factory=lambda c: Recorder(c), service_check=lambda: True,
+        output_factory=lambda: NativeChroma(dll), own_pid=OWN, screen_factory=lambda: None)
+    config = AppConfig(devices=[Device(id="a", name="a", local_key="k", ip="1.1.1.1", enabled=True)])
+    config.settings.idle = "full"
+    service.start(config)
+
+    def wait(cond, t=3):
+        end = time.time() + t
+        while time.time() < end and not cond():
+            time.sleep(0.01)
+        return cond()
+
+    try:
+        with caplog.at_level("INFO", logger="tuyachroma"):
+            assert wait(lambda: ("Init",) in dll.calls)
+            state.update(game=True, current=26332)          # the game
+            assert wait(lambda: ("UnInit",) in dll.calls)
+            state.update(game=False, current=0)              # game over, Synapse keeps its profile
+            inits = dll.calls.count(("Init",))
+            assert wait(lambda: dll.calls.count(("Init",)) >= inits + 2)  # reconnected again
+            state["current"] = OWN                           # Synapse shows our effect again
+            assert wait(lambda: any("show the program's effect again" in r.message for r in caplog.records))
+        assert not service.razer_kept_by_synapse
+        # Synapse never gives them back: stop after the tries and say what to check
+        monkeypatch.setattr(engine, "RECLAIM_TRIES", 2)
+        state["current"] = 0
+        assert wait(lambda: service.razer_kept_by_synapse, 4)
+        assert "Aplikacje Chroma" in service.razer_status
+        time.sleep(0.3)  # the last try finishes
+        n = dll.calls.count(("Init",))
+        time.sleep(0.6)
+        assert dll.calls.count(("Init",)) == n  # no endless reconnecting
+    finally:
+        service.stop()
