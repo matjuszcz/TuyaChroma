@@ -345,3 +345,104 @@ def test_service_uses_detected_layout() -> None:
         assert service.keyboard_layout == "full"
     finally:
         service.stop()
+
+
+class SlowWorker(Recorder):
+    """Like a real bulb worker: needs a moment to give the bulb back."""
+
+    log: list = []
+
+    def __init__(self, cfg, restore_time=0.4):
+        super().__init__(cfg)
+        self._done = time.monotonic() + 3600
+        self._restore_time = restore_time
+        SlowWorker.log.append(("start", cfg.id, time.monotonic()))
+
+    def request_stop(self):
+        super().request_stop()
+        self._done = time.monotonic() + self._restore_time
+
+    def is_alive(self):
+        return time.monotonic() < self._done
+
+    def join(self, timeout=None):
+        end = time.monotonic() + (timeout or 0)
+        while self.is_alive() and time.monotonic() < end:
+            time.sleep(0.01)
+        if not self.is_alive():
+            SlowWorker.log.append(("stopped", self.cfg.id, time.monotonic()))
+
+
+def _idle_reader(sources):
+    class R:
+        def wait(self, ms):
+            time.sleep(0.005)
+
+        def read(self, src):
+            return Frame(src, 13, None, 1)
+
+        def read_apps(self):
+            return ChromaApps(current_pid=OWN, apps={OWN: "x.exe"})
+
+        def close(self):
+            pass
+
+    return R()
+
+
+def _service(dll, worker_factory):
+    return engine.SyncService(
+        reader_factory=_idle_reader, worker_factory=worker_factory, service_check=lambda: True,
+        output_factory=lambda: NativeChroma(dll), screen_factory=lambda: None, own_pid=OWN,
+        layout_detector=lambda: "full",
+    )
+
+
+def _dev(i, **kw):
+    return Device(id=i, name=i, local_key="k", ip="1.1.1.1", enabled=True, **kw)
+
+
+def test_update_bulbs_without_restart() -> None:
+    dll = FakeDll()
+    created = []
+    service = _service(dll, lambda c: created.append(Recorder(c)) or created[-1])
+    config = AppConfig(devices=[_dev("a"), _dev("b")])
+    config.settings.idle = "full"
+    service.start(config)
+    try:
+        deadline = time.time() + 2
+        while time.time() < deadline and not any(c[0] == "CreateKeyboardEffect" for c in dll.calls):
+            time.sleep(0.01)
+        a, b = service.workers
+        config.devices.append(_dev("c"))          # tick a new bulb
+        config.device("b").enabled = False         # untick another
+        assert service.update_bulbs(config)
+        assert service.workers[0] is a             # untouched bulb keeps running
+        assert [w.cfg.id for w in service.workers] == ["a", "c"]
+        assert b.calls[-1] == "stop"               # removed bulb given back
+        assert service.player.bulb_count == 2
+        config.device("a").zone = "left"           # changed settings: only that bulb restarts
+        assert service.update_bulbs(config)
+        assert service.workers[0] is not a and service.workers[1].cfg.id == "c"
+        assert ("UnInit",) not in dll.calls        # Razer devices never fell back to Synapse
+        config.device("c").source = "mouse"        # needs another Razer device -> full restart
+        assert not service.update_bulbs(config)
+    finally:
+        service.stop()
+
+
+def test_new_connection_waits_for_old_one() -> None:
+    SlowWorker.log = []
+    service = _service(FakeDll(), lambda c: SlowWorker(c, restore_time=0.4))
+    config = AppConfig(devices=[_dev("lamp")])
+    config.settings.idle = "effect"
+    service.start(config)
+    service.stop(timeout=0.05)  # the lamp is slow to give back (like in the log)
+    service.start(config)       # restart right away
+    try:
+        events = [e for e in SlowWorker.log if e[1] == "lamp"]
+        stopped = next(t for kind, _id, t in events if kind == "stopped")
+        second_start = [t for kind, _id, t in events if kind == "start"][1]
+        assert second_start >= stopped  # reconnects only after the old connection closed
+    finally:
+        service.stop()

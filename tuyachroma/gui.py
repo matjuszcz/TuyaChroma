@@ -150,11 +150,30 @@ class App:
             if not self._quitting:
                 self.root.after(100, self._pump)
 
-    def save_and_apply(self) -> None:
+    def save_and_apply(self, bulbs_only: bool = False) -> None:
+        """Save and apply changes; quick successive changes are applied together.
+
+        ``bulbs_only``: only the bulb selection/settings changed, so running
+        bulbs and the Razer effect continue without a restart (no flicker).
+        """
         save(self.config)
-        if self.config.settings.sync_enabled:
-            self.set_busy("Stosuję zmiany…")
-            self.run_bg(lambda: self.service.restart(self.config), lambda _r: self.set_busy(""))
+        if not self.config.settings.sync_enabled:
+            return
+        self._apply_full = getattr(self, "_apply_full", False) or not bulbs_only
+        if getattr(self, "_apply_pending", None) is not None:
+            self.root.after_cancel(self._apply_pending)
+        self.set_busy("Stosuję zmiany…")
+        self._apply_pending = self.root.after(800, self._apply_now)
+
+    def _apply_now(self) -> None:
+        self._apply_pending = None
+        full, self._apply_full = self._apply_full, False
+
+        def apply() -> None:
+            if full or not self.service.update_bulbs(self.config):
+                self.service.restart(self.config)
+
+        self.run_bg(apply, lambda _r: self.set_busy(""))
 
     def set_busy(self, text: str) -> None:
         self.busy_var.set(text)
@@ -627,7 +646,7 @@ class App:
         self.refresh_devices()
         self.tree.selection_set(iid)
         self._load_editor()
-        self.save_and_apply()
+        self.save_and_apply(bulbs_only=True)
 
     def _load_editor(self) -> None:
         dev = self._selected_device()
@@ -658,7 +677,7 @@ class App:
         if dev.method not in METHOD_LABELS:
             dev.method = "colour"
         self.refresh_devices()
-        self.save_and_apply()
+        self.save_and_apply(bulbs_only=True)
 
     def scan_lan(self) -> None:
         if not self.config.devices:
@@ -683,7 +702,7 @@ class App:
             msg += " Brakujące: czy są włączone? Czy Zapora Windows nie blokuje programu?"
         self.set_busy(msg)
         self.refresh_devices()
-        self.save_and_apply()
+        self.save_and_apply(bulbs_only=True)
 
     def test_bulb(self) -> None:
         dev = self._selected_device()

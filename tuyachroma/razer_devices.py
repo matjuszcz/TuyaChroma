@@ -198,10 +198,13 @@ def list_present_devices() -> list[tuple[str, str]]:
 
 def detect() -> list[RazerDevice]:
     try:
-        return group_devices(list_present_devices())
+        devices = group_devices(list_present_devices())
     except Exception:  # noqa: BLE001 - never break the app because of device listing
         _LOGGER.exception("Razer device detection failed")
         return []
+    _LOGGER.info("Razer devices: %s", "; ".join(
+        f"{d.name} [{d.category}, PID {d.pid or '-'}, {d.connection}]" for d in devices) or "none")
+    return devices
 
 
 def keyboard_layout(devices: list[RazerDevice]) -> str:

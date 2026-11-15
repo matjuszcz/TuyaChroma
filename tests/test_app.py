@@ -625,3 +625,37 @@ def test_gui_update_available(tmp_path, monkeypatch) -> None:
         service.stop()
         app._quitting = True
         app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_quick_clicks_applied_once(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui
+
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    calls = []
+    monkeypatch.setattr(service, "update_bulbs", lambda cfg: calls.append("update") or True)
+    monkeypatch.setattr(service, "restart", lambda cfg: calls.append("restart"))
+    config = AppConfig(devices=[dev("a"), dev("b"), dev("c")])
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    try:
+        for d in config.devices:  # three quick ticks
+            d.enabled = True
+            app.save_and_apply(bulbs_only=True)
+        deadline = time.time() + 3
+        while time.time() < deadline and not calls:
+            app.root.update()
+            time.sleep(0.02)
+        time.sleep(0.2)
+        app.root.update()
+        assert calls == ["update"]  # one live update, no restart
+        app.save_and_apply()  # e.g. settings changed -> full restart
+        deadline = time.time() + 3
+        while time.time() < deadline and len(calls) < 2:
+            app.root.update()
+            time.sleep(0.02)
+        assert calls == ["update", "restart"]
+    finally:
+        service.stop()
+        app._quitting = True
+        app.root.destroy()

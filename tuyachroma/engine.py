@@ -47,6 +47,11 @@ def zone_color(cfg: BulbConfig, colors: list[RGB], keyboard_area=None) -> RGB:
     return adjust(reduce_colors(leds, cfg.mode), cfg.brightness, cfg.min_brightness)
 
 
+def _alive(worker) -> bool:
+    is_alive = getattr(worker, "is_alive", None)
+    return bool(is_alive()) if callable(is_alive) else False
+
+
 def detect_keyboard_layout() -> str:
     return razer_devices.keyboard_layout(razer_devices.detect())
 
@@ -128,6 +133,11 @@ class SyncService:
         self.game_active = False
         self.game_name = ""
         self._profile: Profile | None = None
+        self._sources: list[str] = []
+        # Workers still giving their bulb back after a stop/update. A new
+        # connection to the same bulb waits for them: many Tuya bulbs accept
+        # only one local connection at a time.
+        self._retiring: list[BulbWorker] = []
 
     @property
     def running(self) -> bool:
@@ -139,7 +149,9 @@ class SyncService:
                 return
             s = config.settings
             self.keyboard_layout = self._resolve_layout(s.keyboard_layout)
-            self.workers = [self._worker_factory(d.bulb_config()) for d in config.enabled_devices]
+            configs = [d.bulb_config() for d in config.enabled_devices]
+            self._wait_for_retiring({c.id for c in configs})
+            self.workers = [self._worker_factory(c) for c in configs]
             for w in self.workers:
                 w.start()
             self.player = None
@@ -160,9 +172,8 @@ class SyncService:
                     self._hook = self._keyhook_factory(renderer.key_pressed)
                     self._hook.start()
             self._stop.clear()
-            sources = sorted({w.cfg.source for w in self.workers})
-            if s.idle == "full" and not sources:
-                sources = ["keyboard"]  # still detect games for the Razer devices
+            sources = self._needed_sources(configs, s.idle)
+            self._sources = sources
             self._thread = threading.Thread(target=self._run, args=(sources, s), name="razer-reader",
                                             daemon=True)
             self._thread.start()
@@ -183,6 +194,8 @@ class SyncService:
                 self.player = None
             for w in self.workers:
                 w.join(max(0.1, deadline - time.monotonic()))
+            # still restoring (slow bulb): remember them so a restart doesn't collide
+            self._retiring += [w for w in self.workers if _alive(w)]
             if self._thread is not None:
                 self._thread.join(max(0.1, deadline - time.monotonic()))
             self._thread = None
@@ -191,6 +204,56 @@ class SyncService:
             self.game_active = False
             self.game_name = ""
             _LOGGER.info("Sync stopped")
+
+    @staticmethod
+    def _needed_sources(configs: list[BulbConfig], idle: str) -> list[str]:
+        sources = sorted({c.source for c in configs})
+        if idle == "full" and not sources:
+            sources = ["keyboard"]  # still detect games for the Razer devices
+        return sources
+
+    def _wait_for_retiring(self, bulb_ids: set[str], timeout: float = 8.0) -> None:
+        """Let previous connections to these bulbs finish first."""
+        deadline = time.monotonic() + timeout
+        for w in list(self._retiring):
+            if w.cfg.id in bulb_ids and _alive(w):
+                w.join(max(0.0, deadline - time.monotonic()))
+        self._retiring = [w for w in self._retiring if _alive(w)]
+
+    def update_bulbs(self, config: AppConfig) -> bool:
+        """Apply a changed bulb selection/settings without a full restart.
+
+        Unchanged bulbs keep running (no flicker) and the Razer devices keep
+        their effect. Returns False if a full restart is needed instead.
+        """
+        with self._lock:
+            if not self.running:
+                return False
+            configs = [d.bulb_config() for d in config.enabled_devices]
+            if self._needed_sources(configs, config.settings.idle) != self._sources:
+                return False  # another Razer device must be read: restart the reader
+            current = {w.cfg.id: w for w in self.workers}
+            keep: dict[str, BulbWorker] = {}
+            for bulb_id, worker in current.items():
+                wanted = next((c for c in configs if c.id == bulb_id), None)
+                if wanted is not None and wanted == worker.cfg:
+                    keep[bulb_id] = worker
+                else:
+                    worker.request_stop()  # removed or changed: give it back first
+                    self._retiring.append(worker)
+            workers = []
+            for cfg in configs:
+                worker = keep.get(cfg.id)
+                if worker is None:
+                    self._wait_for_retiring({cfg.id})
+                    worker = self._worker_factory(cfg)
+                    worker.start()
+                workers.append(worker)
+            self.workers = workers
+            if self.player is not None:
+                self.player.bulb_count = len(workers)
+            _LOGGER.info("Bulbs updated: %d bulb(s), %d unchanged", len(workers), len(keep))
+            return True
 
     def _resolve_layout(self, setting: str) -> str:
         if setting in KEYBOARD_AREAS:
