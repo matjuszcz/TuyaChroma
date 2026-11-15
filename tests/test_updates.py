@@ -161,3 +161,18 @@ def test_pid_fallback_name(db_dir) -> None:
 def test_repository_database_matches_bundled() -> None:
     repo = Path(__file__).resolve().parents[1] / "data" / "razer_devices.json"
     devices_db.validate(json.loads(repo.read_text(encoding="utf-8")))
+
+
+def test_update_refuses_read_only_folder(tmp_path, monkeypatch) -> None:
+    import sys
+
+    exe = tmp_path / "TuyaChroma.exe"
+    exe.write_bytes(b"x")
+    monkeypatch.setattr(updater, "can_self_update", lambda: True)
+    monkeypatch.setattr(sys, "executable", str(exe))
+    monkeypatch.setattr(updater.os, "access", lambda path, mode: False)  # e.g. Program Files
+    downloads = []
+    with pytest.raises(updater.UpdateError, match="uprawnień"):
+        updater.apply_update(updater.Release("9", "v9", "", "", "", 0, "x"),
+                             get=lambda *a, **k: downloads.append(a))
+    assert downloads == []  # refused before downloading anything

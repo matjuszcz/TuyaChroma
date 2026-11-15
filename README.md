@@ -91,10 +91,8 @@ Jeśli starsze urządzenie albo starsza wersja Synapse nie obsługuje rozszerzon
 
 ## Instalacja
 
-1. Pobierz `TuyaChroma-windows.zip`:
-   * z zakładki **[Releases](../../releases)**, jeśli jest wydanie, albo
-   * z **[Actions](../../actions)** → ostatnie udane uruchomienie *Build TuyaChroma (Windows)* → *Artifacts* (wymaga zalogowania w GitHub).
-2. Rozpakuj go do stałego folderu, np. `C:\Program Files\TuyaChroma` albo `C:\TuyaChroma`.
+1. Pobierz `TuyaChroma-windows.zip` z **[najnowszego wydania](../../releases/latest)**.
+2. Rozpakuj go do stałego folderu **w swoim profilu użytkownika**, np. `%LOCALAPPDATA%\TuyaChroma` (wpisz to w pasek adresu Eksploratora) albo `C:\TuyaChroma`. **Nie** używaj `C:\Program Files`: zapis tam wymaga uprawnień administratora, więc automatyczna aktualizacja nie mogłaby podmienić programu.
 3. Uruchom `TuyaChroma.exe`. Program nie ma podpisu cyfrowego, więc Windows SmartScreen może go zablokować. Kliknij wtedy *Więcej informacji → Uruchom mimo to*.
 
 ## Pierwsze uruchomienie
@@ -109,7 +107,9 @@ Zakładka **Konto Tuya**:
 
 Program pobierze urządzenia i przez około 10 s poszuka ich w sieci.
 
-> **Zapora Windows:** przy pierwszym wyszukiwaniu Windows zapyta, czy zezwolić programowi TuyaChroma na dostęp do sieci. Zaznacz **sieci prywatne** i kliknij *Zezwalaj*. Bez tego program nie znajdzie żarówek (nasłuchuje ich komunikatów w sieci lokalnej). Konto służy tylko do pobrania listy żarówek i kluczy, a sterowanie odbywa się wyłącznie lokalnie. Klucze żarówek i zapamiętane logowanie są zapisane zaszyfrowane (Windows DPAPI) w pliku `%APPDATA%\TuyaChroma\config.json`.
+> **Zapora Windows:** przy pierwszym wyszukiwaniu Windows zapyta, czy zezwolić programowi TuyaChroma na dostęp do sieci. Zaznacz **sieci prywatne** i kliknij *Zezwalaj*. Bez tego program nie znajdzie żarówek (nasłuchuje ich komunikatów w sieci lokalnej).
+
+Konto służy tylko do pobrania listy żarówek i kluczy, a sterowanie odbywa się wyłącznie lokalnie. Klucze żarówek i zapamiętane logowanie są zapisane zaszyfrowane (Windows DPAPI) w pliku `%APPDATA%\TuyaChroma\config.json`.
 
 > Program korzysta z tego samego logowania kodem QR co integracja Tuya w Home Assistant. Dlatego aplikacja Smart Life pokaże je jako autoryzację **„Home Assistant”**. Twoja dotychczasowa integracja Tuya w HA działa dalej.
 

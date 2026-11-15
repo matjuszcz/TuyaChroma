@@ -166,9 +166,16 @@ def apply_update(release: Release, get=_get) -> None:
     if not can_self_update():
         raise UpdateError("aktualizacja działa tylko w wersji .exe – pobierz ją ze strony wydań")
     current = Path(sys.executable)
+    if not os.access(current.parent, os.W_OK):
+        raise UpdateError(
+            f"brak uprawnień do zapisu w folderze {current.parent} – przenieś program do folderu "
+            "użytkownika (np. %LOCALAPPDATA%\\TuyaChroma) albo pobierz nową wersję ręcznie")
     work = Path(tempfile.mkdtemp(prefix="TuyaChroma-update-"))
     new_exe = download(release, work, get)
-    install(new_exe, current)
+    try:
+        install(new_exe, current)
+    except PermissionError as err:
+        raise UpdateError(f"nie można podmienić pliku programu ({err}) – pobierz nową wersję ręcznie") from err
     shutil.rmtree(work, ignore_errors=True)
     _LOGGER.info("Updated to %s, restarting", release.version)
     subprocess.Popen([str(current), "--updated"], close_fds=True)  # noqa: S603
