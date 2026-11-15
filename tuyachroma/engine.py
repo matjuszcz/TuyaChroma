@@ -676,6 +676,7 @@ class SyncService:
         background: set[int] = set()      # Chroma apps that never showed an effect
         self.other_apps = {}
         not_ours_since: float | None = None
+        last_shown: int | None = None  # which app Synapse shows (logged on change)
         last_reclaim = 0.0
         reclaim_tries = 0
         try:
@@ -764,6 +765,11 @@ class SyncService:
                     self.game_active = raw_game or now - game_seen < GAME_HOLD
                     self.game_name = (apps.current_name if raw_game and apps else held_name) \
                         if self.game_active else ""
+                    if apps is not None and apps.current_pid != last_shown:
+                        last_shown = apps.current_pid
+                        _LOGGER.info("Synapse shows: %s", "this program" if last_shown == self._own_pid
+                                     else f"{apps.current_name or '?'} ({last_shown})" if last_shown
+                                     else "its own profile")
                     player = self.player
                     if (full_sync and player is not None and apps is not None and not raw_game
                             and not player.yielded and getattr(player, "output_ready", False)):

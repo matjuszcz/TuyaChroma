@@ -862,6 +862,9 @@ def test_razer_devices_are_reclaimed_after_a_game(monkeypatch, caplog) -> None:
             assert wait(lambda: dll.calls.count(("Init",)) >= inits + 2)  # reconnected again
             state["current"] = OWN                           # Synapse shows our effect again
             assert wait(lambda: any("show the program's effect again" in r.message for r in caplog.records))
+            shown = [r.message for r in caplog.records if r.message.startswith("Synapse shows:")]
+            assert "Synapse shows: bf6.exe (26332)" in shown and "Synapse shows: its own profile" in shown
+            assert shown[-1] == "Synapse shows: this program"  # each change logged once
         assert not service.razer_kept_by_synapse
         # Synapse never gives them back: stop after the tries and say what to check
         monkeypatch.setattr(engine, "RECLAIM_TRIES", 2)
