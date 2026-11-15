@@ -56,6 +56,7 @@ RETRY_FIRST = 5.0
 # so the fade ends together with the Razer devices).
 COLOUR_FADE_MS = 250.0  # colour mode: the light's own fade
 MUSIC_FADE_MS = 100.0   # music data with transition "gradient": a short, quick fade
+NO_ACK_MS = 2000.0  # a "confirmation" this slow is the timeout, not the light's delay
 HEARTBEAT_EVERY = 8.0  # keep the persistent socket alive (and notice a light that rebooted)
 REFRESH_EVERY = 10.0  # resend an unchanged color: a bulb that rebooted shows it again
 SLOW_MAX = 1.0        # slowest sending rate (s) for a bulb that can't keep up
@@ -148,10 +149,12 @@ class BulbConfig:
     mode: str = "vivid"
     brightness: float = 1.0
     min_brightness: float = 0.05
-    # auto:   smooth music/control-data fades where the account lists
-    #         "control_data" (quick, like the app's music sync), else colour
-    # colour: the light's normal (slower) fade      music: music fades (forced)
-    # jump:   instant changes, no transition at all
+    # auto:   colour mode - the light's own smooth fade, sent ahead so it ends
+    #         with the Razer devices. (Music/control data with a gradient was
+    #         tried: on the user's GU10s every new color restarted a long fade
+    #         and the lights hardly moved - see the 1.9.15 video.)
+    # colour: the same, explicitly       music: music data with fades (opt-in)
+    # jump:   music data, instant changes, no transition (opt-in)
     method: str = "auto"
     codes: tuple[str, ...] = ()  # the light's data points from the Tuya account
     min_interval: float = 0.15
@@ -203,6 +206,7 @@ class BulbWorker(threading.Thread):
         self.connected = False
         self.status = STATUS_CONNECTING
         self.latency_ms: float | None = None  # measured: color sent -> bulb confirmed
+        self.no_ack = False  # the light never confirms colors (only timeouts)
         # pause between colors for a bulb that can't keep up (>= cfg.min_interval)
         self.slow_interval = _learned_slow.get(cfg.id, 0.0)
         self._last_problem = 0.0
@@ -376,10 +380,7 @@ class BulbWorker(threading.Thread):
         self.dps = sorted((str(k) for k in status["dps"]), key=lambda k: (len(k), k))
         method = self.cfg.method
         can_music = bool(dev.dpset.get("music"))
-        if method == "auto":
-            self.use_music = can_music and "control_data" in self.cfg.codes
-        else:
-            self.use_music = can_music and method in ("music", "jump")
+        self.use_music = can_music and method in ("music", "jump")
         # Razer profiles flow smoothly, so the lights fade too (music data with
         # transition 1 = gradient); only "jump" changes instantly (transition 0).
         self.transition = 0 if method == "jump" else 1
@@ -514,7 +515,17 @@ class BulbWorker(threading.Thread):
                     values[dps["mode"]] = "colour"
             started = time.perf_counter()
             check_reply(dev.set_multiple_values(values), "color")
-        self._record_latency((time.perf_counter() - started) * 1000)
+        took = (time.perf_counter() - started) * 1000
+        if took >= NO_ACK_MS:
+            # No confirmation, only the timeout (seen with music data on GU10 bulbs):
+            # that is not the light's delay - don't send effects 3 s ahead for it.
+            if not self.no_ack:
+                _LOGGER.warning("%s: the light doesn't confirm colors in %s mode (each waited "
+                                "%.0f ms) - choose 'Automatycznie' or 'Kolor'", self.cfg.name,
+                                "music" if self.use_music else "colour", took)
+            self.no_ack = True
+        else:
+            self._record_latency(took)
         self._in_sync_mode = True
         self.status = STATUS_SYNC
         self._sent = rgb

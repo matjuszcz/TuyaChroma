@@ -39,23 +39,24 @@ def test_other_recommendations() -> None:
     white = dev("w", name="Biała")
     slow = dev("s", name="Wolna")
     rgbic = dev("ic", name="Listwa IC", category="dd", codes=["colour_data", "paint_colour_data"])
-    music = dev("m", name="Muzyczna", codes=["colour_data", "music_data"], method="colour")
+    music = dev("m", name="Muzyczna", codes=["colour_data", "music_data"], method="music")
     gone = dev("g", name="Wyłączona")
     details = {
         "w": {"status": bulbs.STATUS_UNSUPPORTED},
         "s": {"status": bulbs.STATUS_SYNC, "latency_ms": 450},
         "ic": {"status": bulbs.STATUS_SYNC, "latency_ms": 50},
-        "m": {"status": bulbs.STATUS_SYNC, "latency_ms": 50},
+        "m": {"status": bulbs.STATUS_SYNC, "latency_ms": 2970},  # 1.9.15 log: GU10 in music mode
         "g": {"status": bulbs.STATUS_OFFLINE},
     }
     settings = AppConfig().settings
     settings.effect_sync = "ticks"
     advice = advisor.advise([white, slow, rgbic, music, gone], details, settings)
     changes = {(c.dev_id, c.field): c.new for c in advice.changes}
-    assert changes == {("w", "enabled"): False, ("s", "min_interval"): 1.0}
+    assert ("s", "min_interval") in changes
+    assert changes[("w", "enabled")] is False and changes[("s", "min_interval")] == 1.0
+    assert changes[("m", "method")] == "auto"  # it never confirmed music colors
     text = "\n".join(advice.notes)
     assert "Listwa IC" in text and "RGBIC" in text
-    assert "Muzyczna" in text and "Music" in text
     assert "Wyłączona" in text and "Szukaj w sieci" in text
     assert "Oszczędna" in text
 
@@ -101,12 +102,9 @@ def test_real_setup_from_a_log() -> None:
                "b1": {"status": bulbs.STATUS_SYNC, "latency_ms": 70,
                       "dps": ["20", "21", "22", "23", "24", "25", "26", "34"]}}
     advice = advisor.advise(devices, details)
-    # Lampka Biurko is already on "wolno"; the Battletron strip gets "średnio";
-    # the GU10 can change colors instantly (control_data): no fading behind the Razer devices
-    assert [(c.dev_id, c.field, c.new) for c in advice.changes] == [
-        ("ls", "min_interval", 0.3), ("b1", "method", "auto")]
+    # Lampka Biurko is already on "wolno"; the Battletron strip gets "średnio"
+    assert [(c.dev_id, c.field, c.new) for c in advice.changes] == [("ls", "min_interval", 0.3)]
     text = "\n".join(advice.notes)
     assert "Lampa TV" not in text and "Jadalnia" not in text  # not controlled by Razer
-    assert text.count("Tryb Music") == 1 and "Lampka Biurko, Led Strip." in text
     assert text.count("20 segmentów") == 2  # what is known about Battletron lights
     assert len(advice.report) == 5  # the report still lists everything

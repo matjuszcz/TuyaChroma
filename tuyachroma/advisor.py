@@ -80,7 +80,6 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
     changes: list[Change] = []
     notes: list[str] = []
     report: list[str] = []
-    music: list[str] = []
     for dev in devices:
         info = details.get(dev.id, {})
         codes = set(getattr(dev, "codes", []) or [])
@@ -147,13 +146,11 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
         elif dev.category in STRIP_CATEGORIES:
             notes.append(f"{dev.name}: zwykła listwa RGB – cała świeci jednym kolorem, w efekcie Wave "
                          "jest jednym punktem fali razem z żarówkami.")
-        if "control_data" in codes and dev.method == "colour":
+        if dev.method in ("music", "jump") and (info.get("no_ack") or (latency or 0) > 1500):
             changes.append(Change(
                 dev.id, dev.name, "method", dev.method, "auto",
-                "potrafi zmieniać kolor natychmiast, bez płynnego przejścia, które opóźnia go "
-                "względem urządzeń Razer – Tryb: Kolor → Automatycznie"))
-        elif codes & MUSIC_CODES and dev.method == "colour":
-            music.append(dev.name)
+                "nie potwierdza kolorów w trybie Music (każdy czekał ~3 s, więc zmieniał się "
+                "skokami) – Tryb → Automatycznie"))
         if info.get("rate_not_the_cause"):
             notes.append(f"{dev.name}: znika z sieci nawet przy 1 zmianie koloru na sekundę – to nie "
                          "wina programu. Najczęściej pomaga inny zasilacz (np. ładowarka 5 V / 2 A "
@@ -167,10 +164,6 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
                          "„Szukaj w sieci”.")
         if not dev.ip:
             notes.append(f"{dev.name}: brak adresu IP – kliknij „Szukaj w sieci”.")
-    if music:
-        notes.append("Tryb Music (kolor zmienia się od razu, bez płynnego przejścia) obsługują: "
-                     f"{', '.join(music)}. Możesz go wypróbować w ustawieniach światła → Tryb, "
-                     "a potem kliknąć Testuj.")
     if settings is not None and getattr(settings, "effect_sync", "precise") != "precise":
         notes.append("Ustawienia: synchronizacja kolorów jest w trybie „Oszczędna”. Dla najdokładniejszych "
                      "kolorów wybierz „Dokładna”.")

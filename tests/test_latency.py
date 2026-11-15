@@ -220,19 +220,44 @@ def test_precise_bulbs_match_each_other_and_the_keyboard() -> None:
     assert colors[0] == colors[1] == colors[2] == keyboard
 
 
-def test_auto_mode_uses_instant_changes_where_supported() -> None:
-    """Video: the GU10 spots faded behind the mouse; they list control_data (instant)."""
-    for codes, expected in ((("colour_data_v2", "control_data", "music_data"), True),
-                            (("colour_data", "music_data"), False)):  # Battletron: no control_data
-        bulb = FakeBulb(music=True)
-        worker = BulbWorker(BulbConfig(name="x", id="x", ip="1", local_key="k", codes=codes),
-                            device_factory=lambda _c, b=bulb: b)
+def test_auto_mode_is_colour_mode_even_with_control_data() -> None:
+    """1.9.15 log: GU10s in music mode never confirmed colors (~3 s timeout each)."""
+    bulb = FakeBulb(music=True)
+    worker = BulbWorker(BulbConfig(name="x", id="x", ip="1", local_key="k",
+                                   codes=("colour_data_v2", "control_data", "music_data")),
+                        device_factory=lambda _c: bulb)
+    worker.start()
+    try:
+        assert wait_for(lambda: worker.connected)
+        assert worker.use_music is False and worker.fade_ms == bulbs.COLOUR_FADE_MS
+    finally:
+        worker.stop(2)
+
+
+def test_missing_confirmation_is_not_counted_as_delay(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(bulbs, "NO_ACK_MS", 50.0)
+
+    class Silent(FakeBulb):
+        def set_multiple_values(self, values, nowait=False):
+            if "24" in values:
+                time.sleep(0.08)  # "waited for the timeout"
+            super().set_multiple_values(values, nowait)
+
+    bulb = Silent(music=False)
+    worker = BulbWorker(BulbConfig(name="GU10", id="g", ip="1", local_key="k", min_interval=0.02),
+                        device_factory=lambda _c: bulb)
+    with caplog.at_level("WARNING", logger="tuyachroma.bulbs"):
         worker.start()
         try:
             assert wait_for(lambda: worker.connected)
-            assert worker.use_music is expected
+            worker.set_color((255, 0, 0))
+            assert wait_for(lambda: worker.no_ack)
+            worker.set_color((0, 255, 0))
+            time.sleep(0.3)
         finally:
             worker.stop(2)
+    assert worker.latency_ms is None  # effects are not sent seconds ahead because of it
+    assert sum("doesn't confirm colors" in r.message for r in caplog.records) == 1
 
 
 def test_offset_includes_the_lights_fade() -> None:
@@ -252,7 +277,7 @@ def test_offset_includes_the_lights_fade() -> None:
 def test_methods_keep_profiles_smooth() -> None:
     """Razer profiles flow smoothly: every mode but "jump" fades between colors."""
     cases = {  # method, codes -> (music data?, transition, fade)
-        ("auto", ("control_data",)): (True, 1, bulbs.MUSIC_FADE_MS),
+        ("auto", ("control_data",)): (False, 1, bulbs.COLOUR_FADE_MS),
         ("auto", ("music_data",)): (False, 1, bulbs.COLOUR_FADE_MS),  # Battletron: colour mode
         ("colour", ("control_data",)): (False, 1, bulbs.COLOUR_FADE_MS),
         ("music", ()): (True, 1, bulbs.MUSIC_FADE_MS),

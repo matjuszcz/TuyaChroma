@@ -499,6 +499,7 @@ class SyncService:
             "dropped_off": learned_slow_interval(w.cfg.id),
             "renew_every": learned_max_age(w.cfg.id),
             "rate_not_the_cause": rate_not_the_cause(w.cfg.id),
+            "no_ack": getattr(w, "no_ack", False),
         } for w in self.workers}
 
     def bulb_latencies(self) -> dict[str, float | None]:
