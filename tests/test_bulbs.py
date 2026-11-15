@@ -253,3 +253,38 @@ def test_unchanged_color_is_refreshed(monkeypatch) -> None:
         assert len(bulb.sent) >= n + 2
     finally:
         worker.stop(2)
+
+
+def test_bulb_that_dropped_off_stays_slower(monkeypatch) -> None:
+    """Lampka Biurko vanished from Wi-Fi under a fast effect: remember to go easy on it."""
+    from tuyachroma import bulbs
+
+    monkeypatch.setattr(bulbs, "_learned_slow", {})
+    monkeypatch.setattr(bulbs, "RETRY_FIRST", 0.01)
+    monkeypatch.setattr(bulbs, "SLOW_RECOVER", 0.0)  # would normally speed up again
+    worker, bulb = make_worker(music=False)
+    try:
+        worker.set_color((255, 0, 0))
+        assert wait_for(lambda: len(bulb.sent) >= 1)
+        gone = {"left": 1}
+        real = bulb.set_multiple_values
+
+        def drop(values, nowait=False):
+            real(values, nowait)
+            if gone["left"]:
+                gone["left"] -= 1
+                return {"Error": "Network Error: Device Unreachable", "Err": "905", "Payload": None}
+            return None
+
+        bulb.set_multiple_values = drop
+        worker.set_color((0, 0, 255))
+        assert wait_for(lambda: gone["left"] == 0 and worker.connected and worker.status == STATUS_SYNC, 3)
+        for color in ((1, 200, 1), (200, 1, 1), (1, 1, 200)):
+            worker.set_color(color)
+            time.sleep(0.1)
+        assert worker.slow_interval >= 0.3  # did not recover below what it learned
+        assert bulbs._learned_slow["x"] >= 0.3
+    finally:
+        worker.stop(2)
+    again = BulbWorker(worker.cfg, device_factory=lambda _cfg: FakeBulb())
+    assert again.slow_interval >= 0.3  # a new worker (e.g. after changing settings) remembers

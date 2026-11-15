@@ -67,6 +67,13 @@ METHOD_LABELS = {
     "colour": "Kolor (zalecany)",
     "music": "Music (szybszy, nie każda żarówka)",
 }
+# Device.min_interval (s between colors) -> label
+SPEED_LABELS = {
+    0.15: "szybko – do 7 zmian/s (domyślnie)",
+    0.3: "średnio – ok. 3 zmiany/s",
+    0.5: "wolno – 2 zmiany/s",
+    1.0: "bardzo wolno – 1 zmiana/s",
+}
 RAZER_GREEN = "#44d62c"
 
 
@@ -251,6 +258,7 @@ class App:
         self.ed_brightness = tk.DoubleVar(value=100)
         self.ed_method = tk.StringVar()
         self.ed_latency = tk.IntVar(value=0)
+        self.ed_speed = tk.StringVar(value=SPEED_LABELS[0.15])
         ttk.Checkbutton(self.editor, text="Steruj przez Razer", variable=self.ed_enabled).grid(row=0, column=0, sticky="w")
         ttk.Label(self.editor, text="Źródło koloru:").grid(row=0, column=1, sticky="e", padx=(16, 4))
         ttk.Combobox(self.editor, textvariable=self.ed_source, state="readonly", width=14,
@@ -273,8 +281,13 @@ class App:
                     width=7).grid(row=3, column=2, sticky="w", pady=(8, 0))
         ttk.Label(self.editor, text="(+ gdy żarówka spóźnia się względem klawiatury)",
                   foreground="#666").grid(row=3, column=3, columnspan=2, sticky="w", padx=(16, 0), pady=(8, 0))
+        ttk.Label(self.editor, text="Szybkość zmian:").grid(row=4, column=1, sticky="e", padx=(16, 4), pady=(8, 0))
+        ttk.Combobox(self.editor, textvariable=self.ed_speed, state="readonly", width=30,
+                     values=list(SPEED_LABELS.values())).grid(row=4, column=2, columnspan=2, sticky="w", pady=(8, 0))
+        ttk.Label(self.editor, text="(wolniej, jeśli żarówka się zawiesza)",
+                  foreground="#666").grid(row=4, column=4, sticky="w", padx=(8, 0), pady=(8, 0))
         btns = ttk.Frame(self.editor)
-        btns.grid(row=4, column=0, columnspan=5, sticky="w", pady=(10, 0))
+        btns.grid(row=5, column=0, columnspan=5, sticky="w", pady=(10, 0))
         ttk.Button(btns, text="Zapisz", command=self.save_editor).pack(side="left")
         ttk.Button(btns, text="Testuj (mignij)", command=self.test_bulb).pack(side="left", padx=8)
         self.editor.columnconfigure(5, weight=1)
@@ -727,6 +740,8 @@ class App:
         self.ed_brightness.set(round(dev.brightness * 100))
         self.ed_method.set(METHOD_LABELS.get(dev.method, METHOD_LABELS["colour"]))
         self.ed_latency.set(int(dev.latency_adjust_ms))
+        speed = min(SPEED_LABELS, key=lambda v: abs(v - dev.min_interval))
+        self.ed_speed.set(SPEED_LABELS[speed])
 
     def save_editor(self) -> None:
         dev = self._selected_device()
@@ -745,6 +760,7 @@ class App:
             dev.latency_adjust_ms = max(-1000, min(1000, int(self.ed_latency.get())))
         except (tk.TclError, ValueError):
             dev.latency_adjust_ms = 0
+        dev.min_interval = next((k for k, v in SPEED_LABELS.items() if v == self.ed_speed.get()), 0.15)
         if dev.method not in METHOD_LABELS:
             dev.method = "colour"
         self.refresh_devices()

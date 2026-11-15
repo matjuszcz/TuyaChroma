@@ -36,6 +36,10 @@ RETRY_FIRST = 5.0
 REFRESH_EVERY = 10.0  # resend an unchanged color: a bulb that rebooted shows it again
 SLOW_MAX = 1.0        # slowest sending rate (s) for a bulb that can't keep up
 SLOW_RECOVER = 30.0   # after this long without problems, try sending faster again
+
+# Bulbs that dropped off Wi-Fi while getting colors (cheap ones reboot when
+# flooded): they keep the slower rate until the program is restarted.
+_learned_slow: dict[str, float] = {}
 RETRY_MAX = 15.0  # seconds between connection attempts to an unreachable bulb
 
 
@@ -119,7 +123,8 @@ class BulbWorker(threading.Thread):
         self.connected = False
         self.status = STATUS_CONNECTING
         self.latency_ms: float | None = None  # measured: color sent -> bulb confirmed
-        self.slow_interval = 0.0  # extra pause between colors for a bulb that can't keep up
+        # pause between colors for a bulb that can't keep up (>= cfg.min_interval)
+        self.slow_interval = _learned_slow.get(cfg.id, 0.0)
         self._last_problem = 0.0
         self._send_count = 0
 
@@ -169,7 +174,7 @@ class BulbWorker(threading.Thread):
                     if self._send_count == sends_before:
                         raise  # nothing got through since connecting: normal retry with pauses
                     # It worked a moment ago: reconnect right away, not after a pause.
-                    self._slow_down()
+                    self._slow_down(dropped_off=isinstance(err, BulbOffline))
                     _LOGGER.warning("%s: %s - reconnecting", self.cfg.name, err)
                     self._disconnect()
                     self._stopping.wait(0.5)
@@ -261,8 +266,10 @@ class BulbWorker(threading.Thread):
                     check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
                     last_contact = now
                 continue
-            if self.slow_interval and now - self._last_problem > SLOW_RECOVER:
-                self.slow_interval = self.slow_interval / 2 if self.slow_interval > 0.1 else 0.0
+            floor = _learned_slow.get(self.cfg.id, 0.0)
+            if self.slow_interval > floor and now - self._last_problem > SLOW_RECOVER:
+                halved = self.slow_interval / 2
+                self.slow_interval = max(floor, halved if halved > 0.1 else 0.0)
                 self._last_problem = now
             wait = max(self.cfg.min_interval, self.slow_interval) - (now - last_send)
             if wait > 0:
@@ -313,11 +320,18 @@ class BulbWorker(threading.Thread):
         self._sent = rgb
         self._send_count += 1
 
-    def _slow_down(self) -> None:
+    def _slow_down(self, dropped_off: bool = False) -> None:
         """The bulb stopped confirming colors: send them less often for a while."""
         self.slow_interval = min(max(self.slow_interval * 2, self.cfg.min_interval * 2, 0.3), SLOW_MAX)
         self._last_problem = time.monotonic()
-        _LOGGER.info("%s: sending at most every %.2f s", self.cfg.name, self.slow_interval)
+        if dropped_off:
+            # It vanished from the network (probably rebooted): stay slower for good.
+            _learned_slow[self.cfg.id] = self.slow_interval
+            _LOGGER.info("%s: dropped off the network while syncing - sending at most every "
+                         "%.2f s until the program restarts (set 'Szybkość zmian' to make it "
+                         "permanent)", self.cfg.name, self.slow_interval)
+        else:
+            _LOGGER.info("%s: sending at most every %.2f s", self.cfg.name, self.slow_interval)
 
     def _record_latency(self, ms: float) -> None:
         """Smoothed send->confirm time; ignores single outliers (e.g. Wi-Fi hiccups)."""

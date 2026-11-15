@@ -399,6 +399,13 @@ def test_gui_shows_login_error_and_validates_version(tmp_path, monkeypatch) -> N
         app.ed_version.set("abc")
         app.save_editor()
         assert config.devices[0].version == ""
+        assert app.ed_speed.get() == gui.SPEED_LABELS[0.15]
+        app.ed_speed.set(gui.SPEED_LABELS[0.5])  # a bulb that hangs when flooded
+        app.save_editor()
+        assert config.devices[0].min_interval == 0.5
+        assert config.devices[0].bulb_config().min_interval == 0.5
+        app._load_editor()
+        assert app.ed_speed.get() == gui.SPEED_LABELS[0.5]
     finally:
         service.stop()
         app.root.destroy()
