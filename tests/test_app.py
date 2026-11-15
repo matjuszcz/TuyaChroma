@@ -936,3 +936,31 @@ def test_editor_choice_survives_the_status_refresh(tmp_path, monkeypatch) -> Non
         assert app.ed_source.get() == gui.SOURCE_LABELS["mouse"]
     finally:
         app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_editor_does_not_undo_changes_made_elsewhere(tmp_path, monkeypatch) -> None:
+    """A new IP found by the program, or the ✓ column, must survive an editor save."""
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui
+
+    config = AppConfig(devices=[dev("lb", enabled=True, name="Lampka Biurko", ip="192.168.0.71")])
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    monkeypatch.setattr(app, "save_and_apply", lambda bulbs_only=False: None)
+    try:
+        app.tree.selection_set("lb")
+        app.root.update()
+        config.devices[0].ip = "192.168.0.99"   # found again after a router restart
+        config.devices[0].enabled = False       # ✓ unticked
+        app.ed_source.set(gui.SOURCE_LABELS["chromalink"])
+        app.save_editor()
+        d = config.devices[0]
+        assert (d.source, d.ip, d.enabled) == ("chromalink", "192.168.0.99", False)
+        app._reload_editor_if_idle()  # the editor now shows the current values
+        assert app.ed_ip.get() == "192.168.0.99" and app.ed_enabled.get() is False
+        app.ed_brightness.set(50)
+        app.save_editor()
+        assert d.brightness == 0.5 and d.ip == "192.168.0.99"
+    finally:
+        app.root.destroy()

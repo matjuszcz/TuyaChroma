@@ -757,6 +757,11 @@ class App:
         self._load_editor()
         self.save_and_apply(bulbs_only=True)
 
+    def _reload_editor_if_idle(self) -> None:
+        """A light was changed elsewhere: show it, unless the user is editing."""
+        if self._autosave_pending is None and self._editor_dev_id is not None:
+            self._load_editor()
+
     def _on_tree_select(self) -> None:
         dev = self._selected_device()
         if dev is not None and dev.id != self._editor_dev_id:
@@ -787,6 +792,7 @@ class App:
         finally:
             self._editor_loading = False
         self._editor_dev_id = dev.id
+        self._editor_snapshot = self._editor_values()
 
     def _fill_editor(self, dev: Device) -> None:
         self.editor.configure(text=f"Ustawienia światła: {dev.name}")
@@ -803,32 +809,66 @@ class App:
         speed = min(SPEED_LABELS, key=lambda v: abs(v - dev.min_interval))
         self.ed_speed.set(SPEED_LABELS[speed])
 
+    def _editor_values(self) -> dict[str, Any]:
+        """The editor's fields as shown (raw), to tell what the user changed."""
+        def get(var):
+            try:
+                return var.get()
+            except tk.TclError:  # e.g. a half-typed number
+                return None
+        return {name: get(var) for name, var in (
+            ("enabled", self.ed_enabled), ("source", self.ed_source), ("zone", self.ed_zone),
+            ("ip", self.ed_ip), ("version", self.ed_version), ("brightness", self.ed_brightness),
+            ("method", self.ed_method), ("latency", self.ed_latency), ("use_scene", self.ed_use_scene),
+            ("speed", self.ed_speed))}
+
     def save_editor(self, quiet: bool = False) -> None:
+        if self._autosave_pending is not None:  # saving now: nothing left to save later
+            self.root.after_cancel(self._autosave_pending)
+            self._autosave_pending = None
         dev = (self.config.device(self._editor_dev_id) if self._editor_dev_id else None) \
             or self._selected_device()
         if dev is None:
             if not quiet:
                 messagebox.showinfo("TuyaChroma", "Najpierw wybierz światło z listy.")
             return
+        # Only fields the user changed are written: the light may have been changed
+        # elsewhere meanwhile (✓ column, a new IP found, automatic settings, ...).
+        shown = self._editor_values()
+        loaded = getattr(self, "_editor_snapshot", {})
+        changed = {k for k, v in shown.items() if loaded.get(k) != v}
         before = asdict(dev)
-        dev.enabled = self.ed_enabled.get()
-        dev.source = _label_to_key(SOURCE_LABELS, self.ed_source.get())
-        dev.zone = _label_to_key(ZONE_LABELS, self.ed_zone.get())
-        dev.ip = self.ed_ip.get().strip()
-        version = self.ed_version.get().strip().replace(",", ".")
-        dev.version = version if version in ("3.1", "3.2", "3.3", "3.4", "3.5") else ""
-        dev.brightness = round(self.ed_brightness.get()) / 100
-        dev.method = _label_to_key(METHOD_LABELS, self.ed_method.get()) or "colour"
-        try:
-            dev.latency_adjust_ms = max(-1000, min(1000, int(self.ed_latency.get())))
-        except (tk.TclError, ValueError):
-            dev.latency_adjust_ms = 0
-        dev.use_scene = self.ed_use_scene.get() and bool(dev.scene)
-        dev.min_interval = next((k for k, v in SPEED_LABELS.items() if v == self.ed_speed.get()), 0.15)
-        if dev.method not in METHOD_LABELS:
-            dev.method = "colour"
-        if quiet and asdict(dev) == before:
-            return  # nothing changed
+        if "enabled" in changed:
+            dev.enabled = bool(shown["enabled"])
+        if "source" in changed:
+            dev.source = _label_to_key(SOURCE_LABELS, shown["source"])
+        if "zone" in changed:
+            dev.zone = _label_to_key(ZONE_LABELS, shown["zone"])
+        if "ip" in changed:
+            dev.ip = (shown["ip"] or "").strip()
+        if "version" in changed:
+            version = (shown["version"] or "").strip().replace(",", ".")
+            dev.version = version if version in ("3.1", "3.2", "3.3", "3.4", "3.5") else ""
+        if "brightness" in changed and shown["brightness"] is not None:
+            dev.brightness = round(shown["brightness"]) / 100
+        if "method" in changed:
+            dev.method = _label_to_key(METHOD_LABELS, shown["method"]) or "colour"
+            if dev.method not in METHOD_LABELS:
+                dev.method = "colour"
+        if "latency" in changed:
+            try:
+                dev.latency_adjust_ms = max(-1000, min(1000, int(shown["latency"])))
+            except (TypeError, ValueError):
+                dev.latency_adjust_ms = 0
+        if "use_scene" in changed:
+            dev.use_scene = bool(shown["use_scene"]) and bool(dev.scene)
+        if "speed" in changed:
+            dev.min_interval = next((k for k, v in SPEED_LABELS.items() if v == shown["speed"]), 0.15)
+        self._editor_snapshot = shown
+        if asdict(dev) == before:
+            if not quiet:
+                self.set_busy("Bez zmian.")
+            return
         _LOGGER.info("%s: settings saved (source %s, zone %s)", dev.name, dev.source, dev.zone)
         self.refresh_devices()
         self.save_and_apply(bulbs_only=True)
@@ -1074,6 +1114,7 @@ class App:
                 _LOGGER.info("New bulb IPs: %s", "; ".join(changed))
                 self.set_busy("Znaleziono żarówki pod nowym adresem IP: " + "; ".join(changed))
                 self.refresh_devices()
+                self._reload_editor_if_idle()
                 self.save_and_apply(bulbs_only=True)
 
         def failed(_err: Exception) -> None:
@@ -1240,6 +1281,7 @@ class App:
                 n = advisor.apply(self.config.devices, advice.changes)
                 _LOGGER.info("Auto settings: applied %d change(s)", n)
                 self.refresh_devices()
+                self._reload_editor_if_idle()
                 self.save_and_apply(bulbs_only=True)
                 self.set_busy(f"Zastosowano {n} zmian(y).")
         else:
