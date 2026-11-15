@@ -75,3 +75,18 @@ def test_reader_requires_windows(monkeypatch) -> None:
     monkeypatch.setattr(razer.sys, "platform", "linux")
     with pytest.raises(razer.RazerUnavailable):
         razer.ChromaReader(["keyboard"])
+
+
+def test_unknown_effect_type_logged_once(caplog) -> None:
+    from tuyachroma import razer
+
+    razer._UNKNOWN_SEEN.discard(("keyboard", 99))
+    spec = razer.DEVICES["keyboard"]
+    obj = spec.struct()
+    obj.write_index = 1
+    obj.data[0].effect_type = 99
+    raw = bytes(obj)
+    with caplog.at_level("INFO", logger="tuyachroma.razer"):
+        assert razer.parse("keyboard", raw).active is False
+        razer.parse("keyboard", raw)
+    assert sum("effect type 99" in r.message for r in caplog.records) == 1

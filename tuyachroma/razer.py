@@ -359,6 +359,9 @@ def _effect_main_color(effect: object, etype: int, ticks: int) -> RGB | None:
     return None
 
 
+_UNKNOWN_SEEN: set[tuple[str, int]] = set()
+
+
 def parse(device: str, raw: bytes) -> Frame | None:
     """Decode a raw shared-memory snapshot. Returns None if nothing was written yet."""
     spec = DEVICES[device]
@@ -389,6 +392,9 @@ def parse(device: str, raw: bytes) -> Frame | None:
         colors = [main] * spec.count
     else:
         colors = None
+        if (device, etype) not in _UNKNOWN_SEEN:
+            _UNKNOWN_SEEN.add((device, etype))
+            _LOGGER.info("%s: effect type %d is not decoded (treated as no game effect)", device, etype)
     return Frame(device=device, effect_type=etype, colors=colors, ticks=ticks)
 
 

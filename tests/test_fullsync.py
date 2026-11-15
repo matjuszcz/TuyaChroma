@@ -514,7 +514,8 @@ def test_full_sync_hands_razer_devices_to_a_game(monkeypatch) -> None:
         state["running"].clear()  # game closed
         state["current"] = OWN
         assert wait(lambda: dll.calls.count(("Init",)) > inits)  # our profile is back
-        assert not service.player.yielded and not service.game_active
+        assert not service.player.yielded
+        assert wait(lambda: not service.game_active)  # after the short hold
     finally:
         service.stop()
 
@@ -561,5 +562,80 @@ def test_background_chroma_app_does_not_block_full_sync(monkeypatch) -> None:
         time.sleep(0.5)
         assert not service.player.yielded  # and it stays that way
         assert "pełna synchronizacja" in service.razer_status
+    finally:
+        service.stop()
+
+
+def _game_service(monkeypatch, read, sources_cfg=("keyboard",)):
+    from tuyachroma import winsys
+
+    monkeypatch.setattr(winsys, "process_alive", lambda pid: pid == 34092)
+
+    class Reader:
+        def __init__(self, sources):
+            self.sources = sources
+
+        def wait(self, ms):
+            time.sleep(0.005)
+
+        def read(self, src):
+            return read(src)
+
+        def read_apps(self):
+            return ChromaApps(current_pid=34092, apps={OWN: "TuyaChroma.exe", 34092: "Cyberpunk2077.exe"})
+
+        def close(self):
+            pass
+
+    workers = []
+    service = engine.SyncService(
+        reader_factory=Reader, worker_factory=lambda c: workers.append(Recorder(c)) or workers[-1],
+        service_check=lambda: True, output_factory=lambda: NativeChroma(FakeDll()),
+        own_pid=OWN, screen_factory=lambda: None)
+    config = AppConfig(devices=[Device(id=f"b{i}", name=f"b{i}", local_key="k", ip="1.1.1.1",
+                                       enabled=True, source=s) for i, s in enumerate(sources_cfg)])
+    config.settings.idle = "full"
+    return service, config, workers
+
+
+def test_game_effect_pauses_do_not_flicker(monkeypatch, caplog) -> None:
+    """Cyberpunk 2077 (log): ~0.6 s effect, ~70 ms of nothing, again and again."""
+    start = time.monotonic()
+
+    def read(src):
+        phase = (time.monotonic() - start) % 0.68
+        if phase > 0.61:  # the short gap
+            return Frame(src, 99, None, 1)
+        return Frame(src, 7, [(255, 200, 0)] * DEVICES[src].count, 1)  # Cyberpunk yellow
+
+    service, config, workers = _game_service(monkeypatch, read)
+    with caplog.at_level("INFO", logger="tuyachroma.engine"):
+        service.start(config)
+        try:
+            time.sleep(2.2)
+        finally:
+            service.stop()
+    colors = [c for c in workers[0].calls if isinstance(c, tuple)]
+    assert colors and set(colors) == {colors[0]}  # only the game's color, never the profile
+    starts = [r for r in caplog.records if r.message.startswith("Game effect active")]
+    assert len(starts) == 1 and not any(r.message == "Game effect ended" for r in caplog.records
+                                        if r.created - caplog.records[0].created < 2.0)
+
+
+def test_light_on_another_device_follows_the_game(monkeypatch) -> None:
+    """The game drives only the keyboard: a light set to the mouse follows it too."""
+    def read(src):
+        if src == "keyboard":
+            return Frame(src, 6, [(0, 0, 255)] * DEVICES[src].count, 1)
+        return Frame(src, 99, None, 1)
+
+    service, config, workers = _game_service(monkeypatch, read, sources_cfg=("mouse",))
+    service.start(config)
+    try:
+        end = time.time() + 2
+        while time.time() < end and not any(c == (0, 0, 255) for c in workers[0].calls):
+            time.sleep(0.01)
+        assert (0, 0, 255) in workers[0].calls
+        assert service._sources == ["keyboard", "mouse"]  # the keyboard is read for that
     finally:
         service.stop()

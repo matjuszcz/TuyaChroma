@@ -100,6 +100,10 @@ class AliveCache:
 # A newly seen Chroma app gets the Razer devices for this long; if it shows no
 # effect in that time it is a background app (e.g. a wallpaper program), not a
 # game, and the program takes the devices back and ignores it.
+# A game's effect that pauses for a moment (Cyberpunk 2077: ~70 ms every
+# ~0.7 s) is held: the lights keep the game's last colors instead of
+# flickering to the program's profile and back.
+GAME_HOLD = 2.0
 GAME_PROBATION = 60.0  # games may show effects only after loading
 
 
@@ -130,10 +134,22 @@ def dispatch(
 ) -> bool:
     """Send colors to the bulb workers. Returns True if a game color was used."""
     used_game = False
+    # While a game runs, a light whose own Razer device gets nothing from the game
+    # follows the game's other devices (e.g. only the keyboard), not the profile.
+    fallback = None
+    if game_active:
+        fallback = next((frames[s] for s in ("keyboard", "chromalink", "mouse", "mousepad",
+                                             "headset", "keypad")
+                         if frames.get(s) is not None and frames[s].active), None)
     for index, worker in enumerate(workers):
         frame = frames.get(worker.cfg.source)
         if game_active and frame is not None and frame.active:
             worker.set_color(bulb_color(worker.cfg, frame, keyboard_area))
+            used_game = True
+        elif game_active and fallback is not None:
+            cfg = (dataclasses.replace(worker.cfg, source=fallback.device, zone="all")
+                   if dataclasses.is_dataclass(worker.cfg) else worker.cfg)
+            worker.set_color(bulb_color(cfg, fallback, keyboard_area))
             used_game = True
         elif (idle in ("full", "effect") and profile is not None and profile.effect in SCENE_EFFECTS
               and getattr(worker.cfg, "scene", None) and hasattr(worker, "set_scene")):
@@ -309,8 +325,9 @@ class SyncService:
     @staticmethod
     def _needed_sources(configs: list[BulbConfig], idle: str) -> list[str]:
         sources = sorted({c.source for c in configs})
-        if idle == "full" and not sources:
-            sources = ["keyboard"]  # still detect games for the Razer devices
+        if idle == "full" and "keyboard" not in sources:
+            # detect games (they nearly always drive the keyboard) and follow them
+            sources = sorted({*sources, "keyboard"})
         return sources
 
     def _wait_for_retiring(self, bulb_ids: set[str], timeout: float = 8.0) -> None:
@@ -487,6 +504,9 @@ class SyncService:
         last_others: dict[int, str] = {}
         was_game = False
         alive = AliveCache()
+        last_good: dict[str, tuple[float, Frame]] = {}  # last game frame per device
+        game_seen = 0.0                                  # last moment a game effect was seen
+        held_name = ""
         on_trial: dict[int, float] = {}   # pid -> when we handed it the devices
         background: set[int] = set()      # Chroma apps that never showed an effect
         self.other_apps = {}
@@ -554,8 +574,23 @@ class SyncService:
                     if self.player is not None:
                         # Full sync: a game is running - hand it the Razer devices.
                         self.player.yielded = full_sync and bool(games)
-                    self.game_active = is_game_active(frames, apps, self._own_pid, full_sync)
-                    self.game_name = apps.current_name if (self.game_active and apps) else ""
+                    raw_game = is_game_active(frames, apps, self._own_pid, full_sync)
+                    if raw_game:
+                        game_seen = now
+                        held_name = apps.current_name if apps else ""
+                        for src, f in frames.items():
+                            if f is not None and f.active:
+                                last_good[src] = (now, f)
+                    elif now - game_seen < GAME_HOLD:
+                        # a short pause in the game's effect: keep its last colors
+                        frames = {src: (last_good[src][1] if src in last_good
+                                        and now - last_good[src][0] < GAME_HOLD else f)
+                                  for src, f in frames.items()}
+                    else:
+                        last_good.clear()
+                    self.game_active = raw_game or now - game_seen < GAME_HOLD
+                    self.game_name = (apps.current_name if raw_game and apps else held_name) \
+                        if self.game_active else ""
                     if self.game_active != was_game:
                         was_game = self.game_active
                         if self.game_active:
