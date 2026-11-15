@@ -46,7 +46,7 @@ class Device:
     mode: str = "vivid"
     brightness: float = 1.0
     min_brightness: float = 0.05
-    method: str = "colour"
+    method: str = "auto"  # auto: instant color changes where the light supports them
     min_interval: float = 0.15
     latency_adjust_ms: int = 0  # per-bulb correction for effect timing (ms)
     # The light's own effect captured from the Tuya app (e.g. a wave along a
@@ -64,7 +64,7 @@ class Device:
             name=self.name, id=self.id, ip=self.ip, local_key=self.local_key,
             version=self.version or "3.3", source=self.source, zone=self.zone,
             mode=self.mode, brightness=self.brightness, min_brightness=self.min_brightness,
-            method=self.method, min_interval=self.min_interval,
+            method=self.method, min_interval=self.min_interval, codes=tuple(self.codes),
             latency_adjust_ms=int(self.latency_adjust_ms),
             scene=dict(self.scene) if (self.use_scene and self.scene) else None,
         )
@@ -92,6 +92,7 @@ class Settings:
     latency_ms: int = 300
     fps: float = 20
     sync_enabled: bool = True
+    config_rev: int = 2  # one-time migrations of saved settings (files without it: 0)
 
     @property
     def profile(self) -> Profile:
@@ -218,6 +219,13 @@ def load(path: Path | None = None) -> AppConfig:
     if settings.latency_mode not in ("auto", "manual", "off"):
         settings.latency_mode = "auto"
     settings.latency_ms = max(0, min(3000, int(settings.latency_ms)))
+    if int(s.get("config_rev", 0) or 0) < 2:
+        # 1.9.12: "Kolor" was only the default; lights that can change colors
+        # instantly (music/control data) now do so - they no longer fade behind.
+        for dev in devices:
+            if dev.method == "colour":
+                dev.method = "auto"
+        settings.config_rev = 2
     session: dict[str, Any] = {}
     if data.get("tuya_session"):
         try:

@@ -100,6 +100,10 @@ class AliveCache:
 # A newly seen Chroma app gets the Razer devices for this long; if it shows no
 # effect in that time it is a background app (e.g. a wallpaper program), not a
 # game, and the program takes the devices back and ignores it.
+# Lights in colour mode fade to each new color; sent this much earlier (ms) the
+# fade ends about when the Razer devices show the color (auto delay mode).
+FADE_MS = 250.0
+
 # A game's effect that pauses for a moment (Cyberpunk 2077: ~70 ms every
 # ~0.7 s) is held: the lights keep the game's last colors instead of
 # flickering to the program's profile and back.
@@ -459,6 +463,8 @@ class SyncService:
         """How far ahead (ms) an effect color is sent to this bulb."""
         if settings.latency_mode == "auto":
             base = getattr(worker, "latency_ms", None) or 0.0
+            if not getattr(worker, "use_music", True):
+                base += FADE_MS  # in colour mode the light fades to each new color
         elif settings.latency_mode == "manual":
             base = float(settings.latency_ms)
         else:
@@ -476,6 +482,11 @@ class SyncService:
         assert player is not None
         cfg = worker.cfg
         base = time.monotonic() if at is None else at
+        if at is None:
+            # Precise sync: the light holds this color until its next one, so show
+            # the middle of that time (ticks are already sampled in the middle).
+            interval = getattr(worker, "_interval", None)
+            base += interval() / 2 if callable(interval) else 0.0
         t = base + self.latency_offset_ms(worker, settings) / 1000
         renderer = player.renderer
         if follows_bulb_strip(cfg, profile):

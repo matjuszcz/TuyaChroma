@@ -39,7 +39,7 @@ def test_other_recommendations() -> None:
     white = dev("w", name="Biała")
     slow = dev("s", name="Wolna")
     rgbic = dev("ic", name="Listwa IC", category="dd", codes=["colour_data", "paint_colour_data"])
-    music = dev("m", name="Muzyczna", codes=["colour_data", "music_data"])
+    music = dev("m", name="Muzyczna", codes=["colour_data", "music_data"], method="colour")
     gone = dev("g", name="Wyłączona")
     details = {
         "w": {"status": bulbs.STATUS_UNSUPPORTED},
@@ -90,10 +90,10 @@ def test_real_setup_from_a_log() -> None:
     devices = [
         dev("tv", name="Lampa TV", enabled=False, codes=GU10_CODES),
         dev("lb", name="Lampka Biurko", category="dd", product_name="Battletron Light Bar",
-            codes=BAR_CODES, min_interval=0.5),
+            codes=BAR_CODES, min_interval=0.5, method="colour"),
         dev("ls", name="Led Strip", category="dd", product_name="Battletron Smart desk light Strip",
-            codes=BAR_CODES),
-        dev("b1", name="RGB Biuro 1", codes=GU10_CODES),
+            codes=BAR_CODES, method="colour"),
+        dev("b1", name="RGB Biuro 1", codes=GU10_CODES, method="colour"),
         dev("j1", name="RGB Jadalnia 1", enabled=False, ip="", codes=GU10_CODES),
     ]
     bar = {"status": bulbs.STATUS_SYNC, "latency_ms": 11, "dps": ["20", "21", "24", "26", "47", "53"]}
@@ -101,10 +101,12 @@ def test_real_setup_from_a_log() -> None:
                "b1": {"status": bulbs.STATUS_SYNC, "latency_ms": 70,
                       "dps": ["20", "21", "22", "23", "24", "25", "26", "34"]}}
     advice = advisor.advise(devices, details)
-    # Lampka Biurko is already on "wolno"; the Battletron strip gets "średnio"
-    assert [(c.dev_id, c.new) for c in advice.changes] == [("ls", 0.3)]
+    # Lampka Biurko is already on "wolno"; the Battletron strip gets "średnio";
+    # the GU10 can change colors instantly (control_data): no fading behind the Razer devices
+    assert [(c.dev_id, c.field, c.new) for c in advice.changes] == [
+        ("ls", "min_interval", 0.3), ("b1", "method", "auto")]
     text = "\n".join(advice.notes)
     assert "Lampa TV" not in text and "Jadalnia" not in text  # not controlled by Razer
-    assert text.count("Tryb Music") == 1 and "Lampka Biurko, Led Strip, RGB Biuro 1" in text
+    assert text.count("Tryb Music") == 1 and "Lampka Biurko, Led Strip." in text
     assert text.count("20 segmentów") == 2  # what is known about Battletron lights
     assert len(advice.report) == 5  # the report still lists everything

@@ -218,3 +218,61 @@ def test_precise_bulbs_match_each_other_and_the_keyboard() -> None:
     finally:
         time.monotonic = real
     assert colors[0] == colors[1] == colors[2] == keyboard
+
+
+def test_auto_mode_uses_instant_changes_where_supported() -> None:
+    """Video: the GU10 spots faded behind the mouse; they list control_data (instant)."""
+    for codes, expected in ((("colour_data_v2", "control_data", "music_data"), True),
+                            (("colour_data", "music_data"), False)):  # Battletron: no control_data
+        bulb = FakeBulb(music=True)
+        worker = BulbWorker(BulbConfig(name="x", id="x", ip="1", local_key="k", codes=codes),
+                            device_factory=lambda _c, b=bulb: b)
+        worker.start()
+        try:
+            assert wait_for(lambda: worker.connected)
+            assert worker.use_music is expected
+        finally:
+            worker.stop(2)
+
+
+def test_offset_includes_fade_and_hold() -> None:
+    s = AppConfig().settings
+    fading = SimpleNamespace(latency_ms=60, use_music=False, cfg=SimpleNamespace(latency_adjust_ms=0))
+    instant = SimpleNamespace(latency_ms=60, use_music=True, cfg=SimpleNamespace(latency_adjust_ms=0))
+    off = engine.SyncService.latency_offset_ms
+    assert off(fading, s) == 60 + engine.FADE_MS
+    assert off(instant, s) == 60
+    s.latency_mode = "manual"
+    assert off(fading, s) == s.latency_ms  # manual means exactly what the user set
+
+
+def test_precise_color_is_for_the_middle_of_the_hold() -> None:
+    service = engine.SyncService(layout_detector=lambda: "full", own_pid=1)
+    renderer = Renderer(Profile(effect="spectrum", speed=10))  # 1.6 s per cycle: easy to see
+    service.player = SimpleNamespace(renderer=renderer)
+    settings = AppConfig().settings
+    settings.latency_mode = "off"
+    lamp = SimpleNamespace(latency_ms=None, use_music=True, _interval=lambda: 0.5,
+                           cfg=BulbConfig(name="l", id="x", ip="1", local_key="k", min_brightness=0))
+    real = time.monotonic
+    try:
+        time.monotonic = lambda: 1000.0
+        sent = service._bulb_effect_color(lamp, 0, 1, settings, renderer.profile)
+    finally:
+        time.monotonic = real
+    expected = Renderer(Profile(effect="spectrum", speed=10)).strip(1, 1000.25)[0]
+    assert sent == expected
+
+
+def test_old_default_colour_mode_becomes_auto(tmp_path) -> None:
+    import json
+
+    from tuyachroma.config import load as load_cfg
+
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"settings": {}, "devices": [
+        {"id": "b1", "name": "RGB Biuro 1", "local_key": "", "method": "colour"}]}), encoding="utf-8")
+    assert load_cfg(path).devices[0].method == "auto"   # saved before 1.9.12: was only the default
+    path.write_text(json.dumps({"settings": {"config_rev": 2}, "devices": [
+        {"id": "b1", "name": "RGB Biuro 1", "local_key": "", "method": "colour"}]}), encoding="utf-8")
+    assert load_cfg(path).devices[0].method == "colour"  # chosen by the user later: kept

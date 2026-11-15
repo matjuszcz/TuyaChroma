@@ -144,7 +144,10 @@ class BulbConfig:
     mode: str = "vivid"
     brightness: float = 1.0
     min_brightness: float = 0.05
-    method: str = "colour"  # colour (reliable) | music (faster, not on every bulb) | auto
+    # auto: instant changes (music/control data, no fade) when the account lists
+    # "control_data" for the light, else colour | colour: always fade | music
+    method: str = "auto"
+    codes: tuple[str, ...] = ()  # the light's data points from the Tuya account
     min_interval: float = 0.15
     latency_adjust_ms: int = 0  # extra per-bulb correction for effect timing
     scene: dict | None = None  # built-in effect to play instead of moving colors
@@ -364,7 +367,11 @@ class BulbWorker(threading.Thread):
         self._dev = dev
         self.dps = sorted((str(k) for k in status["dps"]), key=lambda k: (len(k), k))
         method = self.cfg.method
-        self.use_music = bool(dev.dpset.get("music")) and method in ("auto", "music")
+        can_music = bool(dev.dpset.get("music"))
+        if method == "auto":
+            self.use_music = can_music and "control_data" in self.cfg.codes
+        else:
+            self.use_music = can_music and method == "music"
         if method == "music" and not dev.dpset.get("music"):
             _LOGGER.warning("%s: music mode not supported, using colour mode", self.cfg.name)
         self._sent = None

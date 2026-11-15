@@ -65,7 +65,8 @@ LAYOUT_LABELS = {
     "mini": "60% (np. Huntsman Mini)",
 }
 METHOD_LABELS = {
-    "colour": "Kolor (zalecany)",
+    "auto": "Automatycznie (natychmiast, jeśli obsługuje)",
+    "colour": "Kolor (płynne przejścia)",
     "music": "Music (szybszy, nie każda żarówka)",
 }
 # Device.min_interval (s between colors) -> label
@@ -802,7 +803,7 @@ class App:
         self.ed_ip.set(dev.ip)
         self.ed_version.set(dev.version)
         self.ed_brightness.set(round(dev.brightness * 100))
-        self.ed_method.set(METHOD_LABELS.get(dev.method, METHOD_LABELS["colour"]))
+        self.ed_method.set(METHOD_LABELS.get(dev.method, METHOD_LABELS["auto"]))
         self.ed_latency.set(int(dev.latency_adjust_ms))
         self.ed_use_scene.set(dev.use_scene and bool(dev.scene))
         self.ed_scene_info.set("(zapamiętany)" if dev.scene else "(brak zapamiętanego efektu)")
@@ -852,9 +853,9 @@ class App:
         if "brightness" in changed and shown["brightness"] is not None:
             dev.brightness = round(shown["brightness"]) / 100
         if "method" in changed:
-            dev.method = _label_to_key(METHOD_LABELS, shown["method"]) or "colour"
+            dev.method = _label_to_key(METHOD_LABELS, shown["method"]) or "auto"
             if dev.method not in METHOD_LABELS:
-                dev.method = "colour"
+                dev.method = "auto"
         if "latency" in changed:
             try:
                 dev.latency_adjust_ms = max(-1000, min(1000, int(shown["latency"])))

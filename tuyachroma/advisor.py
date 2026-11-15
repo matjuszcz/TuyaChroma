@@ -147,7 +147,12 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
         elif dev.category in STRIP_CATEGORIES:
             notes.append(f"{dev.name}: zwykła listwa RGB – cała świeci jednym kolorem, w efekcie Wave "
                          "jest jednym punktem fali razem z żarówkami.")
-        if codes & MUSIC_CODES and dev.method == "colour":
+        if "control_data" in codes and dev.method == "colour":
+            changes.append(Change(
+                dev.id, dev.name, "method", dev.method, "auto",
+                "potrafi zmieniać kolor natychmiast, bez płynnego przejścia, które opóźnia go "
+                "względem urządzeń Razer – Tryb: Kolor → Automatycznie"))
+        elif codes & MUSIC_CODES and dev.method == "colour":
             music.append(dev.name)
         if info.get("rate_not_the_cause"):
             notes.append(f"{dev.name}: znika z sieci nawet przy 1 zmianie koloru na sekundę – to nie "
