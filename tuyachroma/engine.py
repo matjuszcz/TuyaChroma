@@ -440,73 +440,86 @@ class SyncService:
         reader: ChromaReader | None = None
         last_check = time.monotonic()
 
+        last_error = ""
         try:
             while not self._stop.is_set():
-                if reader is not None and time.monotonic() - last_check > SERVICE_CHECK_INTERVAL:
-                    last_check = time.monotonic()
-                    if not self._service_check():
-                        # Synapse closed / PC shutting down: shared memory keeps the
-                        # last frame, so don't trust it - give the bulbs back.
-                        _LOGGER.warning("Razer SDK service stopped, releasing bulbs")
-                        self._release_all()
+                try:
+                    if reader is not None and time.monotonic() - last_check > SERVICE_CHECK_INTERVAL:
+                        last_check = time.monotonic()
+                        if not self._service_check():
+                            # Synapse closed / PC shutting down: shared memory keeps the
+                            # last frame, so don't trust it - give the bulbs back.
+                            _LOGGER.warning("Razer SDK service stopped, releasing bulbs")
+                            self._release_all()
+                            reader.close()
+                            reader = None
+                            continue
+                    if reader is None:
+                        try:
+                            reader = self._reader_factory(sources)
+                            self.razer_status = "połączono z Razer Chroma"
+                        except (RazerUnavailable, OSError) as err:
+                            self.razer_status = f"Razer niedostępny: {err}"
+                            self._stop.wait(5)
+                            continue
+                    started = time.monotonic()
+                    reader.wait(int(period * 1000))
+                    try:
+                        frames = {src: reader.read(src) for src in sources}
+                        apps = reader.read_apps() if hasattr(reader, "read_apps") else None
+                    except OSError as err:
+                        self.razer_status = f"utracono połączenie: {err}"
                         reader.close()
                         reader = None
                         continue
-                if reader is None:
-                    try:
-                        reader = self._reader_factory(sources)
-                        self.razer_status = "połączono z Razer Chroma"
-                    except (RazerUnavailable, OSError) as err:
-                        self.razer_status = f"Razer niedostępny: {err}"
-                        self._stop.wait(5)
-                        continue
-                started = time.monotonic()
-                reader.wait(int(period * 1000))
-                try:
-                    frames = {src: reader.read(src) for src in sources}
-                    apps = reader.read_apps() if hasattr(reader, "read_apps") else None
-                except OSError as err:
-                    self.razer_status = f"utracono połączenie: {err}"
-                    reader.close()
-                    reader = None
-                    continue
-                if apps is None and full_sync and not warned_no_apps:
-                    warned_no_apps = True
-                    _LOGGER.warning("Synapse's Chroma app list is not available: games can't be "
-                                    "told apart from our own effect in full sync mode")
-                self.game_active = is_game_active(frames, apps, self._own_pid, full_sync)
-                self.game_name = apps.current_name if (self.game_active and apps) else ""
-                profile_frames = strip = None
-                if self.player is not None:
-                    self.player.paused = self.game_active
-                    profile_frames, strip = self.player.latest()
-                profile = self._profile or settings.profile
-                effect_color = effect_source = None
-                clock.update(time.monotonic())
-                key = dataclasses.astuple(profile)  # any change in the profile
-                if key != last_profile:
-                    if last_profile is not None:
-                        clock.reset()
-                    last_profile = key
-                if self.player is not None and settings.effect_sync == "precise":
-                    effect_source = functools.partial(self._bulb_effect_source,
-                                                      settings=settings, profile=profile, key=key)
-                elif self.player is not None:
-                    # every bulb shows the effect at the same moment: the tick's middle
-                    effect_color = functools.partial(self._bulb_effect_color,
-                                                     settings=settings, profile=profile,
-                                                     at=clock.time)
-                dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
-                         profile, clock.allow, KEYBOARD_AREAS[self.keyboard_layout], effect_color,
-                         effect_source)
-                self.razer_status = self._status_text(idle, profile.name)
-                spent = time.monotonic() - started
-                if spent < period:
-                    self._stop.wait(period - spent)
-        except Exception:  # noqa: BLE001
-            _LOGGER.exception("Razer reader crashed")
-            self.razer_status = "błąd odczytu Razer (szczegóły w logu)"
-            self._release_all()
+                    if apps is None and full_sync and not warned_no_apps:
+                        warned_no_apps = True
+                        _LOGGER.warning("Synapse's Chroma app list is not available: games can't be "
+                                        "told apart from our own effect in full sync mode")
+                    self.game_active = is_game_active(frames, apps, self._own_pid, full_sync)
+                    self.game_name = apps.current_name if (self.game_active and apps) else ""
+                    profile_frames = strip = None
+                    if self.player is not None:
+                        self.player.paused = self.game_active
+                        profile_frames, strip = self.player.latest()
+                    profile = self._profile or settings.profile
+                    effect_color = effect_source = None
+                    clock.update(time.monotonic())
+                    key = dataclasses.astuple(profile)  # any change in the profile
+                    if key != last_profile:
+                        if last_profile is not None:
+                            clock.reset()
+                        last_profile = key
+                    if self.player is not None and settings.effect_sync == "precise":
+                        effect_source = functools.partial(self._bulb_effect_source,
+                                                          settings=settings, profile=profile, key=key)
+                    elif self.player is not None:
+                        # every bulb shows the effect at the same moment: the tick's middle
+                        effect_color = functools.partial(self._bulb_effect_color,
+                                                         settings=settings, profile=profile,
+                                                         at=clock.time)
+                    dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
+                             profile, clock.allow, KEYBOARD_AREAS[self.keyboard_layout], effect_color,
+                             effect_source)
+                    self.razer_status = self._status_text(idle, profile.name)
+                    spent = time.monotonic() - started
+                    if spent < period:
+                        self._stop.wait(period - spent)
+                    last_error = ""
+                except Exception as err:  # noqa: BLE001
+                    # Never stop syncing for good: give the bulbs back, then try again.
+                    if repr(err) != last_error:
+                        _LOGGER.exception("Sync loop error - retrying in 5 s")
+                        last_error = repr(err)
+                    self.razer_status = "błąd odczytu Razer (szczegóły w logu) – ponawiam…"
+                    self._release_all()
+                    if reader is not None:
+                        try:
+                            reader.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        reader = None
+                    self._stop.wait(5)
         finally:
             if reader is not None:
                 reader.close()  # releases the mutexes from the owning thread

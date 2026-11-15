@@ -194,6 +194,44 @@ def test_sync_service_lifecycle() -> None:
     assert FakeReader.instances[0].closed and not service.running
 
 
+def test_sync_survives_an_unexpected_error(monkeypatch) -> None:
+    """The core loop must never stop syncing for good because of one error."""
+    from tuyachroma import engine
+
+    FakeReader.instances.clear()
+    workers = []
+
+    def worker_factory(cfg):
+        workers.append(Recorder(cfg))
+        return workers[-1]
+
+    real_dispatch = engine.dispatch
+    calls = {"n": 0}
+
+    def flaky_dispatch(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise RuntimeError("boom")
+        return real_dispatch(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "dispatch", flaky_dispatch)
+    real_wait = engine.threading.Event.wait
+    service = SyncService(reader_factory=FakeReader, worker_factory=worker_factory,
+                          service_check=lambda: True)
+    monkeypatch.setattr(service._stop, "wait", lambda t=None: real_wait(service._stop, min(t or 0, 0.05)))
+    service.start(AppConfig(devices=[dev("a", enabled=True)]))
+    try:
+        deadline = time.time() + 3
+        while time.time() < deadline and calls["n"] < 10:
+            time.sleep(0.01)
+        assert calls["n"] >= 10  # kept going after the error
+        assert "release" in workers[0].calls  # the bulb was given back meanwhile
+        assert len(FakeReader.instances) >= 2  # the Razer reader was reopened
+        assert service.razer_status == "efekt z gry aktywny"
+    finally:
+        service.stop()
+
+
 def test_sync_service_waits_for_razer() -> None:
     def no_razer(_sources):
         raise RazerUnavailable("Synapse not running")

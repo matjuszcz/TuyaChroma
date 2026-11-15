@@ -228,7 +228,7 @@ class App:
 
     def _build_bulbs_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab, text="Żarówki")
+        self.notebook.add(tab, text="Światła")
 
         ttk.Label(tab, text="Światła RGB z Twojego konta. Zaznacz te, którymi ma sterować Razer (kolumna ✓)."
                   ).pack(anchor="w", pady=(0, 4))
@@ -251,7 +251,7 @@ class App:
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._load_editor())
 
-        self.editor = ttk.LabelFrame(tab, text="Ustawienia żarówki", padding=10)
+        self.editor = ttk.LabelFrame(tab, text="Ustawienia światła", padding=10)
         self.editor.pack(fill="x", pady=(8, 0))
         self.ed_enabled = tk.BooleanVar()
         self.ed_source = tk.StringVar()
@@ -319,7 +319,7 @@ class App:
                 "Aplikacja pokaże to jako autoryzację „Home Assistant” – korzystamy z tego samego "
                 "mechanizmu logowania co Home Assistant.\n"
                 "Logowanie jest zapamiętywane (zaszyfrowane dla Twojego konta Windows), żeby przycisk "
-                "„Odśwież z konta” w zakładce Żarówki działał bez ponownego skanowania kodu QR."
+                "„Odśwież z konta” w zakładce Światła działał bez ponownego skanowania kodu QR."
             ),
         ).pack(anchor="w", pady=(8, 12))
         row = ttk.Frame(tab)
@@ -432,7 +432,7 @@ class App:
             lat, foreground="#666", wraplength=self.px(780), justify="left",
             text=("Efekty liczy program, więc wysyła żarówkom kolor z wyprzedzeniem równym ich opóźnieniu – "
                   "wtedy świecą równo z klawiaturą. Zmierzone opóźnienie każdej żarówki widać w kolumnie "
-                  "„Opóźnienie” w zakładce Żarówki, a korektę dla jednej żarówki ustawisz w jej ustawieniach. "
+                  "„Opóźnienie” w zakładce Światła, a korektę dla jednej żarówki ustawisz w jej ustawieniach. "
                   "Kolorów z gry nie da się wyprzedzić (gra steruje klawiaturą bezpośrednio)."),
         ).pack(anchor="w", pady=(4, 0))
         upd = ttk.LabelFrame(tab, text="Aktualizacje", padding=8)
@@ -749,7 +749,7 @@ class App:
         dev = self._selected_device()
         if dev is None:
             return
-        self.editor.configure(text=f"Ustawienia żarówki: {dev.name}")
+        self.editor.configure(text=f"Ustawienia światła: {dev.name}")
         self.ed_enabled.set(dev.enabled)
         self.ed_source.set(SOURCE_LABELS.get(dev.source, dev.source))
         self.ed_zone.set(ZONE_LABELS.get(str(dev.zone), str(dev.zone)))
@@ -1375,7 +1375,7 @@ class App:
         if not s.sync_enabled:
             text, color = "Sterowanie wstrzymane – żarówki działają z HA", "#999"
         elif not self.config.enabled_devices:
-            text, color = "Wybierz żarówki w zakładce „Żarówki”", "#e0a000"
+            text, color = "Wybierz światła w zakładce „Światła”", "#e0a000"
         else:
             status = self.service.razer_status
             text = f"Razer: {status}"

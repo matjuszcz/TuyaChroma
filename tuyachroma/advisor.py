@@ -148,7 +148,7 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
             notes.append(f"{dev.name}: brak adresu IP – kliknij „Szukaj w sieci”.")
     if music:
         notes.append("Tryb Music (kolor zmienia się od razu, bez płynnego przejścia) obsługują: "
-                     f"{', '.join(music)}. Możesz go wypróbować w ustawieniach żarówki → Tryb, "
+                     f"{', '.join(music)}. Możesz go wypróbować w ustawieniach światła → Tryb, "
                      "a potem kliknąć Testuj.")
     if settings is not None and getattr(settings, "effect_sync", "precise") != "precise":
         notes.append("Ustawienia: synchronizacja kolorów jest w trybie „Oszczędna”. Dla najdokładniejszych "

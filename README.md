@@ -116,11 +116,11 @@ Konto służy tylko do pobrania listy żarówek i kluczy, a sterowanie odbywa si
 
 ### 2. Wybór żarówek
 
-Zakładka **Żarówki**:
+Zakładka **Światła**:
 
 * kliknij w kolumnę **✓** przy żarówkach, którymi ma sterować Razer;
 * zaznacz żarówkę, żeby ustawić **źródło koloru**, **strefę** i **jasność**, a potem kliknij **Zapisz**;
-* **Własna fala listwy** (ustawienia żarówki → *Zapamiętaj efekt z aplikacji…*): wiele listew ma wbudowane efekty, np. falę płynącą wzdłuż listwy, której program nie może narysować sam (listwy Tuya przyjmują przez sieć tylko jeden kolor naraz albo ustawiają segmenty bardzo powoli). Ustaw efekt w aplikacji Tuya / Smart Life, kliknij przycisk i *OK* – program odczyta go z listwy i będzie go włączał w profilach **Wave, Spectrum i Koło** (w innych profilach i w grach listwa dalej dostaje zsynchronizowane kolory). Listwa animuje taki efekt sama, więc porusza się w swoim tempie, **nie równo z urządzeniami Razer** – to opcja dla tych, którzy wolą falę wzdłuż listwy od synchronizacji; domyślnie jest wyłączona. Włączasz i wyłączasz to polem *Własna fala listwy w Wave/Spectrum/Koło*.
+* **Własna fala listwy** (ustawienia światła → *Zapamiętaj efekt z aplikacji…*): wiele listew ma wbudowane efekty, np. falę płynącą wzdłuż listwy, której program nie może narysować sam (listwy Tuya przyjmują przez sieć tylko jeden kolor naraz albo ustawiają segmenty bardzo powoli). Ustaw efekt w aplikacji Tuya / Smart Life, kliknij przycisk i *OK* – program odczyta go z listwy i będzie go włączał w profilach **Wave, Spectrum i Koło** (w innych profilach i w grach listwa dalej dostaje zsynchronizowane kolory). Listwa animuje taki efekt sama, więc porusza się w swoim tempie, **nie równo z urządzeniami Razer** – to opcja dla tych, którzy wolą falę wzdłuż listwy od synchronizacji; domyślnie jest wyłączona. Włączasz i wyłączasz to polem *Własna fala listwy w Wave/Spectrum/Koło*.
 * **Szybkość zmian**: jak często żarówka dostaje nowy kolor (domyślnie do 7 razy na sekundę). Ustaw *średnio* albo *wolno* dla żarówki, która przy płynnych efektach się zawiesza albo restartuje;
 * **Testuj (mignij)**: żarówka mignie na czerwono, zielono i niebiesko, a potem wróci do poprzedniego stanu;
 * **Szukaj w sieci**: ponownie znajduje adresy IP (np. po zmianie routera).
@@ -136,7 +136,7 @@ Zakładka **Urządzenia Razer** pokazuje urządzenia Razer wykryte w komputerze:
 
 ### 4. Aktualizacja listy żarówek
 
-Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life kliknij w zakładce *Żarówki* **Odśwież z konta**. Program pobierze aktualną listę świateł RGB i ich klucze, bez ponownego skanowania kodu QR, a potem znajdzie je w sieci. Ustawienia istniejących żarówek zostają. Żarówki usunięte z konta znikają z listy.
+Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life kliknij w zakładce *Światła* **Odśwież z konta**. Program pobierze aktualną listę świateł RGB i ich klucze, bez ponownego skanowania kodu QR, a potem znajdzie je w sieci. Ustawienia istniejących żarówek zostają. Żarówki usunięte z konta znikają z listy.
 
 Żeby to działało, program pamięta logowanie do konta Tuya. Jest ono zapisane **zaszyfrowane** (Windows DPAPI, odczyta je tylko Twoje konto Windows). *Konto Tuya → Wyloguj* usuwa zapisane logowanie. Żarówki i ich klucze zostają, a program dalej nimi steruje.
 
@@ -158,12 +158,12 @@ Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life 
 
 Każda zmiana koloru leci do żarówki przez Wi-Fi, a żarówka sama płynnie przechodzi między kolorami, więc żarówki są trochę w tyle za klawiaturą.
 
-* **Pomiar:** kolumna **Opóźnienie** w zakładce *Żarówki* pokazuje na żywo, ile każda żarówka potrzebuje na potwierdzenie nowego koloru (uśrednione, pojedyncze „czkawki” Wi-Fi są pomijane).
+* **Pomiar:** kolumna **Opóźnienie** w zakładce *Światła* pokazuje na żywo, ile każda żarówka potrzebuje na potwierdzenie nowego koloru (uśrednione, pojedyncze „czkawki” Wi-Fi są pomijane).
 * **Kompensacja w efektach** (*Ustawienia → Opóźnienie żarówek w efektach*). Efekty liczy program, więc wie z góry, jaki kolor będzie za chwilę, i wysyła go żarówce **z wyprzedzeniem**:
   * *Automatyczna* (domyślnie): wyprzedzenie równe zmierzonemu opóźnieniu każdej żarówki;
   * *Ręczna*: jedno wyprzedzenie dla wszystkich, np. 300 ms;
   * *Wyłączona*.
-* **Korekta dla jednej żarówki** (ustawienia żarówki → *Korekta opóźnienia*): np. taśma LED, która wolniej przechodzi między kolorami, dostaje +200 ms. Wartość ujemna, gdy żarówka wyprzedza klawiaturę.
+* **Korekta dla jednej żarówki** (ustawienia światła → *Korekta opóźnienia*): np. taśma LED, która wolniej przechodzi między kolorami, dostaje +200 ms. Wartość ujemna, gdy żarówka wyprzedza klawiaturę.
 * **Kolory z gier** zawsze docierają z niewielkim opóźnieniem (zwykle 0,1–0,3 s). Grą steruje klawiatura bezpośrednio, a program widzi kolor dopiero, gdy już na niej jest, więc nie da się go wysłać wcześniej.
 
 ## Na co dzień
@@ -171,7 +171,7 @@ Każda zmiana koloru leci do żarówki przez Wi-Fi, a żarówka sama płynnie pr
 * Program działa w **zasobniku** (zielona ikona obok zegara). Zarówno minimalizacja (**_**), jak i zamknięcie okna (**X**) chowają je do zasobnika. Program działa wtedy dalej. Całkowicie zamyka go dopiero *Zakończ* w menu ikony.
 * Jeśli ikona jest ukryta pod strzałką **^** obok zegara, przeciągnij ją na pasek, żeby była zawsze widoczna.
 * Menu ikony: **Otwórz**, **Wstrzymaj sterowanie** (żarówki od razu wracają do HA; wstrzymanie trwa do zamknięcia programu lub restartu komputera) albo **Włącz sterowanie**, **Zakończ**.
-* Fala (*Wave*) przechodzi przez żarówki w kolejności z listy w zakładce *Żarówki*.
+* Fala (*Wave*) przechodzi przez żarówki w kolejności z listy w zakładce *Światła*.
 * Kropka w oknie programu: 🟢 efekt z gry jest aktywny, 🔵 Razer działa (odtwarzany jest efekt albo program czeka na grę), 🟡 wymaga uwagi (np. Synapse nie działa albo nie wybrano żarówek).
 
 ## Uwagi o Home Assistant
