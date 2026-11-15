@@ -147,7 +147,7 @@ Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life 
   * *Profil tylko na żarówkach* (domyślnie);
   * *Oddaj żarówki do HA*;
   * *Zostaw ostatni kolor z gry*.
-* **Zmiany koloru żarówek w efektach:** domyślnie 1 na sekundę, oszczędnie dla żarówek. Ustaw 3–5, jeśli chcesz płynniej.
+* **Zmiany koloru żarówek w efektach:** domyślnie 1 na sekundę, oszczędnie dla żarówek. Ustaw 3–5, jeśli chcesz płynniej. Wszystkie żarówki zmieniają kolor w tym samym takcie (wspólny zegar), więc w danej chwili pokazują ten sam moment efektu, nawet jeśli połączyły się w różnym czasie; żarówka, która połączy się później, od razu dołącza do pozostałych.
 
 ### 6. Opóźnienie synchronizacji
 

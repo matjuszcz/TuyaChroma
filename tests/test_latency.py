@@ -91,3 +91,42 @@ def test_latency_settings_saved(tmp_path) -> None:
     assert loaded.settings.latency_mode == "manual" and loaded.settings.latency_ms == 250
     assert loaded.devices[0].latency_adjust_ms == 150
     assert loaded.devices[0].bulb_config().latency_adjust_ms == 150
+
+
+def test_bulbs_connected_at_different_times_show_the_same_color() -> None:
+    """Lamps connect one by one: they must still show the same effect color at once."""
+    service = engine.SyncService(layout_detector=lambda: "full", own_pid=1)
+    renderer = Renderer(Profile(effect="spectrum", speed=5))
+    service.player = SimpleNamespace(renderer=renderer)
+    settings = AppConfig().settings
+    settings.latency_mode = "off"
+
+    class Lamp:
+        def __init__(self, i):
+            self.latency_ms = None
+            self.cfg = BulbConfig(name=f"l{i}", id=str(i), ip="1", local_key="k", min_brightness=0)
+            self.colors = []
+
+        def set_color(self, rgb):
+            self.colors.append(rgb)
+
+    clock = engine.EffectClock(1.0)
+    early, late = Lamp(1), Lamp(2)
+    t0 = 1000.0
+
+    def frame(now, lamps):
+        clock.update(now)
+        color = lambda w, i, n: service._bulb_effect_color(  # noqa: E731
+            w, i, n, settings, renderer.profile, at=clock.time)
+        engine.dispatch(lamps, {}, "effect", False, profile=renderer.profile,
+                        allow_effect=clock.allow, effect_color=color)
+
+    frame(t0 + 0.1, [early])
+    frame(t0 + 0.6, [early, late])      # the late lamp connected half a second later
+    assert len(early.colors) == 1 and len(late.colors) == 1  # joined at once ...
+    assert late.colors[0] == early.colors[0]                 # ... with the same color
+    for k in range(1, 5):
+        frame(t0 + k + 0.05, [early, late])
+        frame(t0 + k + 0.5, [early, late])  # at most one change per tick
+    assert len(early.colors) == len(late.colors) == 5
+    assert early.colors == late.colors

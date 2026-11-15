@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import functools
 import logging
+import math
 import os
 import threading
 import time
@@ -104,6 +105,34 @@ def dispatch(
         elif idle == "restore":
             worker.release()
     return used_game
+
+
+class EffectClock:
+    """One clock for the effect colors of all bulbs.
+
+    Bulbs connect one by one (and reconnect after a hiccup). With a separate
+    schedule each, they sampled a moving effect at different moments and
+    showed different colors at once. Now every bulb changes on the same tick,
+    to the color of that tick's moment; one that connects late joins at once.
+    """
+
+    def __init__(self, step: float) -> None:
+        self.step = step
+        self.tick = 0
+        self._last: dict[int, int] = {}
+
+    def update(self, now: float) -> None:
+        self.tick = math.floor(now / self.step)
+
+    @property
+    def time(self) -> float:
+        return self.tick * self.step
+
+    def allow(self, worker) -> bool:
+        if self._last.get(id(worker)) != self.tick:
+            self._last[id(worker)] = self.tick
+            return True
+        return False
 
 
 class SyncService:
@@ -317,7 +346,8 @@ class SyncService:
             base = 0.0
         return max(-1000.0, min(3000.0, base + getattr(worker.cfg, "latency_adjust_ms", 0)))
 
-    def _bulb_effect_color(self, worker, index: int, count: int, settings, profile) -> RGB:
+    def _bulb_effect_color(self, worker, index: int, count: int, settings, profile,
+                           at: float | None = None) -> RGB:
         """The profile's color for one bulb, rendered ahead by the bulb's delay.
 
         Effects are computed by the program, so the color the bulb will need a
@@ -326,7 +356,8 @@ class SyncService:
         player = self.player
         assert player is not None
         cfg = worker.cfg
-        t = time.monotonic() + self.latency_offset_ms(worker, settings) / 1000
+        base = time.monotonic() if at is None else at
+        t = base + self.latency_offset_ms(worker, settings) / 1000
         renderer = player.renderer
         if cfg.zone == "all" and profile.effect not in DEVICE_EFFECTS:
             rgb = renderer.frame(f"bulbs@{cfg.id}", max(1, count), 1, t)[min(index, count - 1)]
@@ -352,17 +383,10 @@ class SyncService:
         full_sync = idle == "full"
         period = 1.0 / max(1.0, settings.fps)
         step = 1.0 / max(0.5, settings.bulb_effect_rate)
-        last_fx: dict[int, float] = {}
+        clock = EffectClock(step)
         warned_no_apps = False
         reader: ChromaReader | None = None
         last_check = time.monotonic()
-
-        def allow_effect(worker) -> bool:
-            now = time.monotonic()
-            if now - last_fx.get(id(worker), 0.0) >= step:
-                last_fx[id(worker)] = now
-                return True
-            return False
 
         try:
             while not self._stop.is_set():
@@ -406,11 +430,14 @@ class SyncService:
                     profile_frames, strip = self.player.latest()
                 profile = self._profile or settings.profile
                 effect_color = None
+                clock.update(time.monotonic())
                 if self.player is not None:
+                    # every bulb shows the effect at the same moment: the tick's start
                     effect_color = functools.partial(self._bulb_effect_color,
-                                                     settings=settings, profile=profile)
+                                                     settings=settings, profile=profile,
+                                                     at=clock.time)
                 dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
-                         profile, allow_effect, KEYBOARD_AREAS[self.keyboard_layout], effect_color)
+                         profile, clock.allow, KEYBOARD_AREAS[self.keyboard_layout], effect_color)
                 self.razer_status = self._status_text(idle, profile.name)
                 spent = time.monotonic() - started
                 if spent < period:
