@@ -95,3 +95,29 @@ def test_renewing_is_quiet(monkeypatch, caplog) -> None:
     connects = [r for r in caplog.records if "connected (type" in r.message and r.levelname == "INFO"]
     assert len(connects) == 1  # only the first connection is logged
     assert bulbs.STATUS_CONNECTING not in statuses[statuses.index(bulbs.STATUS_SYNC):]
+
+
+def test_rate_is_not_blamed_when_slowing_down_does_not_help(monkeypatch) -> None:
+    """1.9.5 log: Lampka Biurko dropped off at random times even at 1 color per second."""
+    _clean(monkeypatch)
+    monkeypatch.setattr(bulbs, "_rate_innocent", set())
+    worker = BulbWorker(BulbConfig(name="Lampka Biurko", id="lb", ip="1", local_key="k"),
+                        device_factory=lambda _cfg: FakeBulb())
+    for _ in range(4):  # 0.3 -> 0.6 -> 1.0 s, then again at 1.0 s
+        worker._slow_down(dropped_off=True)
+    assert bulbs.rate_not_the_cause("lb")
+    assert worker.slow_interval == 0.0 and bulbs.learned_slow_interval("lb") == 0.0
+    worker._slow_down(dropped_off=True)  # later drops: no slowing down any more
+    assert worker.slow_interval == 0.0
+
+
+def test_advisor_gives_the_speed_back() -> None:
+    from tuyachroma import advisor
+    from tuyachroma.config import Device
+
+    lamp = Device(id="lb", name="Lampka Biurko", local_key="k", ip="1", enabled=True, category="dd",
+                  product_name="Battletron Light Bar", min_interval=1.0)
+    advice = advisor.advise([lamp], {"lb": {"status": bulbs.STATUS_SYNC, "latency_ms": 11,
+                                            "rate_not_the_cause": True, "dropped_off": 0.0}})
+    assert [(c.field, c.new) for c in advice.changes] == [("min_interval", 0.3)]
+    assert any("zasilacz" in n for n in advice.notes)

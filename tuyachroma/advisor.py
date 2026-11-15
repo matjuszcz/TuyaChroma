@@ -117,7 +117,15 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
             slow = _slowest_needed(min(1.0, latency / 1000 * 1.5))
             if slow > needed:
                 needed, why = slow, f"odpowiada wolno (ok. {latency:.0f} ms)"
-        if needed:
+        if info.get("rate_not_the_cause"):
+            # Slower colors didn't stop it dropping off: give the sync its speed back.
+            target = _slowest_needed(hint[0]) if hint is not None else SPEEDS[0]
+            if dev.min_interval > target + 1e-9:
+                changes.append(Change(
+                    dev.id, dev.name, "min_interval", dev.min_interval, target,
+                    "znika z sieci także przy wolnych zmianach, więc wolniej nic nie daje – "
+                    f"Szybkość zmian: {_speed_label(dev.min_interval)} → {_speed_label(target)}"))
+        elif needed:
             target = _slowest_needed(needed)
             if target > dev.min_interval + 1e-9:
                 changes.append(Change(
@@ -141,6 +149,10 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
                          "jest jednym punktem fali razem z żarówkami.")
         if codes & MUSIC_CODES and dev.method == "colour":
             music.append(dev.name)
+        if info.get("rate_not_the_cause"):
+            notes.append(f"{dev.name}: znika z sieci nawet przy 1 zmianie koloru na sekundę – to nie "
+                         "wina programu. Najczęściej pomaga inny zasilacz (np. ładowarka 5 V / 2 A "
+                         "zamiast portu USB komputera lub huba) albo lepszy zasięg Wi-Fi.")
         if info.get("renew_every"):
             notes.append(f"{dev.name}: restartuje się po ok. {info['renew_every'] + 30:.0f} s jednego "
                          f"połączenia – program odnawia połączenie co {info['renew_every']:.0f} s, "

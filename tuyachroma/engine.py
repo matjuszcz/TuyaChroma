@@ -433,7 +433,7 @@ class SyncService:
 
     def bulb_details(self) -> dict[str, dict]:
         """What each running bulb reported and how it behaves (for the settings advisor)."""
-        from .bulbs import learned_max_age, learned_slow_interval  # noqa: PLC0415
+        from .bulbs import learned_max_age, learned_slow_interval, rate_not_the_cause  # noqa: PLC0415
 
         return {w.cfg.id: {
             "status": w.status,
@@ -443,6 +443,7 @@ class SyncService:
             "bulb_type": getattr(getattr(w, "_dev", None), "bulb_type", ""),
             "dropped_off": learned_slow_interval(w.cfg.id),
             "renew_every": learned_max_age(w.cfg.id),
+            "rate_not_the_cause": rate_not_the_cause(w.cfg.id),
         } for w in self.workers}
 
     def bulb_latencies(self) -> dict[str, float | None]:

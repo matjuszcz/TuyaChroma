@@ -91,6 +91,15 @@ def _record_drop_age(dev_id: str, name: str, age: float) -> None:
                      "%.0f s from now on", name, min(close), _max_age[dev_id])
 
 
+# Lights that kept dropping off even at the slowest rate: the rate is not the
+# cause (power supply, Wi-Fi, firmware), so they are not slowed down any more.
+_rate_innocent: set[str] = set()
+
+
+def rate_not_the_cause(dev_id: str) -> bool:
+    return dev_id in _rate_innocent
+
+
 def learned_max_age(dev_id: str) -> float:
     """> 0: renew this light's connection after this many seconds."""
     return _max_age.get(dev_id, 0.0)
@@ -510,6 +519,17 @@ class BulbWorker(threading.Thread):
 
     def _slow_down(self, dropped_off: bool = False) -> None:
         """The bulb stopped confirming colors: send them less often for a while."""
+        dev_id = self.cfg.id
+        if dropped_off and dev_id in _rate_innocent:
+            return  # slowing down didn't help before: keep the colors in sync
+        if dropped_off and _learned_slow.get(dev_id, 0.0) >= SLOW_MAX:
+            _rate_innocent.add(dev_id)
+            _learned_slow.pop(dev_id, None)
+            self.slow_interval = 0.0
+            _LOGGER.warning("%s: keeps dropping off the network even at 1 color per second - the "
+                            "rate is not the cause (check its power supply and Wi-Fi); back to "
+                            "the normal rate", self.cfg.name)
+            return
         self.slow_interval = min(max(self.slow_interval * 2, self.cfg.min_interval * 2, 0.3), SLOW_MAX)
         self._last_problem = time.monotonic()
         if dropped_off and self.cfg.id in _max_age:
