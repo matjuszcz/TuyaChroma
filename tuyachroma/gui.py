@@ -16,7 +16,7 @@ from tkinter import colorchooser, messagebox, ttk
 from typing import Any
 
 from . import __version__, devices_db, razer_devices, updater, winsys
-from .bulbs import probe_version
+from .bulbs import STATUS_OFFLINE, probe_version
 from .config import IDLE_MODES, SOURCES, ZONES, AppConfig, Device, config_dir, save
 from .engine import SyncService
 from .profiles import COLOR_MODES, DIRECTIONS, EFFECTS, Profile
@@ -116,6 +116,7 @@ class App:
         self._fail_since: dict[str, float] = {}
         self._last_rescan = -1e9
         self._rescanning = False
+        self._rescan_every = self.RESCAN_EVERY
         self.root.after(30_000, self._watch_unreachable)
 
     # ----------------------------------------------------------- utilities
@@ -880,6 +881,7 @@ class App:
 
     RESCAN_AFTER = 60.0     # a bulb unreachable this long ...
     RESCAN_EVERY = 300.0    # ... triggers a network search, at most this often
+    RESCAN_IDLE = 1800.0    # not found = switched off: search only every 30 min
 
     def _watch_unreachable(self) -> None:
         if self._quitting:
@@ -893,14 +895,17 @@ class App:
         """Routers often give bulbs a new IP (e.g. after a restart): find them again."""
         statuses = self.service.bulb_statuses()
         failing = {d.id for d in self.config.enabled_devices
-                   if statuses.get(d.id, "").startswith("błąd")}
+                   if statuses.get(d.id, "") == STATUS_OFFLINE
+                   or statuses.get(d.id, "").startswith("błąd")}
         for dev_id in failing:
             self._fail_since.setdefault(dev_id, now)
         for dev_id in list(self._fail_since):
             if dev_id not in failing:
                 del self._fail_since[dev_id]
+        if not self._fail_since:
+            self._rescan_every = self.RESCAN_EVERY
         long_failing = [i for i, t in self._fail_since.items() if now - t >= self.RESCAN_AFTER]
-        if not long_failing or self._rescanning or now - self._last_rescan < self.RESCAN_EVERY:
+        if not long_failing or self._rescanning or now - self._last_rescan < self._rescan_every:
             return
         self._rescanning = True
         self._last_rescan = now
@@ -916,6 +921,9 @@ class App:
                     dev.ip = info["ip"]
                     if info.get("version"):
                         dev.version = info["version"]
+            if not any(i in found for i in long_failing):
+                # They don't announce themselves: switched off, not a new IP.
+                self._rescan_every = self.RESCAN_IDLE
             if changed:
                 _LOGGER.info("New bulb IPs: %s", "; ".join(changed))
                 self.set_busy("Znaleziono żarówki pod nowym adresem IP: " + "; ".join(changed))

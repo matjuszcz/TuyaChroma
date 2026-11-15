@@ -25,10 +25,21 @@ STATUS_CONNECTING = "łączenie…"
 STATUS_READY = "gotowa (stan z HA)"
 STATUS_SYNC = "sterowana przez Razer"
 STATUS_UNSUPPORTED = "nieobsługiwana (brak koloru RGB)"
+STATUS_OFFLINE = "wyłączona / poza siecią"
+
+# tinytuya error codes meaning "nothing answers at this IP" (bulb without power,
+# out of Wi-Fi range, or a new IP address)
+OFFLINE_ERRORS = {"901", "905"}
+RETRY_FIRST = 5.0
+RETRY_MAX = 60.0  # seconds between connection attempts to an unreachable bulb
 
 
 class UnsupportedBulb(Exception):
     """The device cannot show RGB colors."""
+
+
+class BulbOffline(ConnectionError):
+    """Nothing answers: the bulb is switched off (or has another IP)."""
 
 
 @dataclass
@@ -121,10 +132,15 @@ class BulbWorker(threading.Thread):
     # ---------------------------------------------------------------- thread
 
     def run(self) -> None:
+        failures = 0
         while not self._stopping.is_set():
             try:
-                self.status = STATUS_CONNECTING
+                if not failures:
+                    self.status = STATUS_CONNECTING
                 self._connect()
+                if failures:
+                    _LOGGER.info("%s: reachable again", self.cfg.name)
+                failures = 0
                 self._loop()
             except UnsupportedBulb as err:
                 _LOGGER.warning("%s: %s", self.cfg.name, err)
@@ -132,10 +148,18 @@ class BulbWorker(threading.Thread):
                 self._disconnect()
                 return
             except Exception as err:  # noqa: BLE001 - network errors of all kinds
-                _LOGGER.warning("%s: %s", self.cfg.name, err)
-                self.status = f"błąd: {err}"
+                failures += 1
+                offline = isinstance(err, (BulbOffline, TimeoutError))
+                if failures == 1:
+                    _LOGGER.warning("%s: %s%s", self.cfg.name, err,
+                                    " - retrying less and less often" if offline else "")
+                else:
+                    _LOGGER.debug("%s: %s", self.cfg.name, err)
+                self.status = STATUS_OFFLINE if offline else f"błąd: {err}"
                 self._disconnect()
-                self._stopping.wait(5)
+                # 5 s, 10 s, 20 s, 40 s, then every minute: a switched-off bulb
+                # costs nothing, and one that comes back is found within a minute.
+                self._stopping.wait(min(RETRY_FIRST * 2 ** (failures - 1), RETRY_MAX))
         try:
             if self._in_sync_mode:
                 if self._dev is None:
@@ -148,6 +172,9 @@ class BulbWorker(threading.Thread):
     def _connect(self) -> None:
         dev = self._factory(self.cfg)
         status = dev.status()
+        if isinstance(status, dict) and str(status.get("Err")) in OFFLINE_ERRORS:
+            dev.close()
+            raise BulbOffline("not reachable (switched off?)")
         if not status or "dps" not in status:
             raise ConnectionError(f"no status from bulb ({status})")
         if not dev.bulb_configured or not dev.dpset.get("colour"):

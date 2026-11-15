@@ -759,10 +759,12 @@ def test_unreachable_bulbs_found_under_new_ip(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(service, "bulb_statuses", lambda: dict(statuses))
     scans = []
 
+    on_network = {"a": {"id": "a", "ip": "10.0.0.50", "version": "3.5"},
+                  "b": {"id": "b", "ip": "10.0.0.6", "version": "3.3"}}
+
     def fake_scan(seconds):
         scans.append(seconds)
-        return {"a": {"id": "a", "ip": "10.0.0.50", "version": "3.5"},
-                "b": {"id": "b", "ip": "10.0.0.6", "version": "3.3"}}
+        return dict(on_network)
 
     monkeypatch.setattr(gui, "scan", fake_scan)
     monkeypatch.setattr(app, "run_bg", lambda func, done=None, error=None: done(func()))
@@ -782,5 +784,15 @@ def test_unreachable_bulbs_found_under_new_ip(tmp_path, monkeypatch) -> None:
         statuses["a"] = "sterowana przez Razer"
         app._check_unreachable(1500.0)
         assert scans == [10] and app._fail_since == {}
+        # Switched off (not found by the search): search again only every 30 min.
+        statuses["b"] = "wyłączona / poza siecią"
+        del on_network["b"]
+        app._check_unreachable(2000.0)
+        app._check_unreachable(2061.0)
+        assert scans == [10, 10] and app._rescan_every == app.RESCAN_IDLE
+        app._check_unreachable(2061.0 + 400)
+        assert scans == [10, 10]
+        app._check_unreachable(2061.0 + 1801)
+        assert scans == [10, 10, 10]
     finally:
         app.root.destroy()

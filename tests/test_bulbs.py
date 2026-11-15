@@ -171,3 +171,38 @@ def test_restore_retried_after_connection_error() -> None:
     assert wait_for(lambda: worker.status == STATUS_READY, timeout=8)
     assert bulb.sent[-1][1].get("21") == "white"
     worker.stop()
+
+
+def test_switched_off_bulb_is_quiet(monkeypatch, caplog) -> None:
+    """A bulb without power: calm status, one log line, ever longer pauses, then back."""
+    from tuyachroma import bulbs
+
+    monkeypatch.setattr(bulbs, "RETRY_FIRST", 0.01)
+    monkeypatch.setattr(bulbs, "RETRY_MAX", 0.04)
+    bulb = FakeBulb()
+    offline = {"Error": "Network Error: Device Unreachable", "Err": "905", "Payload": None}
+    calls = []
+    power = {"on": False}
+
+    def status():
+        calls.append(time.monotonic())
+        return offline if not power["on"] else FakeBulb.status(bulb)
+
+    bulb.status = status
+    cfg = BulbConfig(name="biuro", id="x", ip="1.2.3.4", local_key="k")
+    worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
+    with caplog.at_level("DEBUG", logger="tuyachroma.bulbs"):
+        worker.start()
+        try:
+            assert wait_for(lambda: len(calls) >= 5)
+            assert worker.status == bulbs.STATUS_OFFLINE
+            warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+            assert len(warnings) == 1
+            gaps = [b - a for a, b in zip(calls, calls[1:])]
+            assert gaps[2] > gaps[0]  # backing off
+            power["on"] = True  # switched on again
+            assert wait_for(lambda: worker.connected)
+            assert worker.status == STATUS_READY
+            assert any("reachable again" in r.message for r in caplog.records)
+        finally:
+            worker.stop(2)
