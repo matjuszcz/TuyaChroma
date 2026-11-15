@@ -63,7 +63,9 @@ CONFIRM_EVERY = 0.0
 # How long to wait for an answer once connected: a light that skips one blocks
 # for this long, not for the 3 s connect timeout.
 REPLY_TIMEOUT = 0.7
-NO_ACK_MS = 2000.0  # a "confirmation" this slow is the timeout, not the light's delay
+# A "confirmation" this slow is the reply timeout running out, not the light's
+# delay (must stay below REPLY_TIMEOUT, or a missing answer counts as 0.7 s delay).
+NO_ACK_MS = REPLY_TIMEOUT * 1000 * 0.9
 HEARTBEAT_EVERY = 8.0  # keep the persistent socket alive (and notice a light that rebooted)
 REFRESH_EVERY = 10.0  # resend an unchanged color: a bulb that rebooted shows it again
 SLOW_MAX = 1.0        # slowest sending rate (s) for a bulb that can't keep up
@@ -238,7 +240,7 @@ class BulbWorker(threading.Thread):
         self._wake.set()
 
     # Settings that need a new connection; everything else applies on the fly.
-    CONNECTION_FIELDS = ("id", "ip", "local_key", "version", "method")
+    CONNECTION_FIELDS = ("id", "ip", "local_key", "version", "method", "codes")
 
     def needs_reconnect(self, cfg: BulbConfig) -> bool:
         return any(getattr(cfg, f) != getattr(self.cfg, f) for f in self.CONNECTION_FIELDS)

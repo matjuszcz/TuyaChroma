@@ -423,3 +423,29 @@ def test_battletron_never_gets_colors_faster_than_it_takes() -> None:
     assert lamp.bulb_config().min_interval == 0.5  # slower settings stay
     other = Device(id="b1", name="RGB Biuro 1", local_key="k", ip="1", product_name="GU10 W505Z2")
     assert other.bulb_config().min_interval == 0.15
+
+
+def test_reply_timeout_is_not_taken_for_delay() -> None:
+    """A missing answer returns after REPLY_TIMEOUT; that must not become the light's delay."""
+    assert bulbs.NO_ACK_MS < bulbs.REPLY_TIMEOUT * 1000
+
+    class Silent(FakeBulb):
+        def set_multiple_values(self, values, nowait=False):
+            super().set_multiple_values(values, nowait)
+            if "24" in values and not nowait and len(self.sent) > 1:
+                time.sleep(bulbs.REPLY_TIMEOUT * 0.95)  # no answer: the reply timeout runs out
+
+    bulb = Silent(music=False)
+    worker = BulbWorker(BulbConfig(name="x", id="rt", ip="1", local_key="k", min_interval=0.02,
+                                   method="colour"), device_factory=lambda _c: bulb)
+    worker.start()
+    try:
+        assert wait_for(lambda: worker.connected)
+        worker.set_color((255, 0, 0))
+        assert wait_for(lambda: worker.latency_ms is not None)
+        first = worker.latency_ms
+        worker.set_color((0, 0, 255))
+        assert wait_for(lambda: worker.no_ack, 3)
+        assert worker.latency_ms == first  # the timeout was not recorded as delay
+    finally:
+        worker.stop(2)
