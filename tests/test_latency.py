@@ -130,3 +130,21 @@ def test_bulbs_connected_at_different_times_show_the_same_color() -> None:
         frame(t0 + k + 0.5, [early, late])  # at most one change per tick
     assert len(early.colors) == len(late.colors) == 5
     assert early.colors == late.colors
+
+
+def test_bulb_shows_the_middle_of_its_tick() -> None:
+    """Holding one color per tick, the bulb is never more than half a tick off."""
+    clock = engine.EffectClock(1.0)
+    clock.update(1000.2)
+    assert clock.time == 1000.5
+    clock.update(1000.99)
+    assert clock.time == 1000.5
+
+
+def test_profile_change_reaches_bulbs_at_once() -> None:
+    clock = engine.EffectClock(1.0)
+    lamp = object()
+    clock.update(1000.1)
+    assert clock.allow(lamp) and not clock.allow(lamp)
+    clock.reset()  # new profile: no waiting for the next tick
+    assert clock.allow(lamp) and not clock.allow(lamp)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import dataclasses
 import functools
 import logging
 import math
@@ -126,7 +127,18 @@ class EffectClock:
 
     @property
     def time(self) -> float:
-        return self.tick * self.step
+        """The moment of the effect a bulb shows during this tick.
+
+        The middle of the tick: the bulb holds one color for the whole tick
+        while the Razer devices keep moving, so it is never more than half a
+        tick ahead of or behind them (with the tick's start it lagged a whole
+        tick - 1/5 of the color wheel in Spectrum at 1 change per second).
+        """
+        return (self.tick + 0.5) * self.step
+
+    def reset(self) -> None:
+        """New profile: every bulb changes right away, together with the Razer devices."""
+        self._last.clear()
 
     def allow(self, worker) -> bool:
         if self._last.get(id(worker)) != self.tick:
@@ -384,6 +396,7 @@ class SyncService:
         period = 1.0 / max(1.0, settings.fps)
         step = 1.0 / max(0.5, settings.bulb_effect_rate)
         clock = EffectClock(step)
+        last_profile: tuple | None = None
         warned_no_apps = False
         reader: ChromaReader | None = None
         last_check = time.monotonic()
@@ -431,6 +444,11 @@ class SyncService:
                 profile = self._profile or settings.profile
                 effect_color = None
                 clock.update(time.monotonic())
+                key = dataclasses.astuple(profile)  # any change in the profile
+                if key != last_profile:
+                    if last_profile is not None:
+                        clock.reset()
+                    last_profile = key
                 if self.player is not None:
                     # every bulb shows the effect at the same moment: the tick's start
                     effect_color = functools.partial(self._bulb_effect_color,
