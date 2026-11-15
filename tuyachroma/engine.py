@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Any
 
-from .bulbs import BulbConfig, BulbWorker, NativeScene
+from .bulbs import STATUS_UNSUPPORTED, BulbConfig, BulbWorker, NativeScene
 from .colors import adjust, reduce_colors, zone_indices
 from .config import AppConfig
 from .inputhook import KeyboardHook
@@ -394,6 +394,39 @@ class SyncService:
                                             daemon=True)
             self._thread.start()
             _LOGGER.info("Sync started (%s) for %d bulb(s)", s.idle, len(self.workers))
+
+    def heal(self, config: AppConfig) -> list[str]:
+        """Watchdog: bring back whatever stopped by an unexpected error.
+
+        The sync thread, the effect player and every light run in their own
+        threads and catch their errors - but a bug could still end one. Then
+        the light (or everything) would stay dead until the program restarts.
+        Returns what was restarted (for the log / status).
+        """
+        healed: list[str] = []
+        with self._lock:
+            thread, player = self._thread, self.player
+            if thread is None or self._stop.is_set():
+                return healed  # not running on purpose
+            broken = (not thread.is_alive() and bool(self._sources)) or (
+                player is not None and not player.is_alive())
+            if not broken:
+                for i, worker in enumerate(self.workers):
+                    if not hasattr(worker, "is_alive") or worker.is_alive():
+                        continue
+                    if getattr(worker, "status", "") == STATUS_UNSUPPORTED:
+                        continue  # ended on purpose: a white-only light
+                    _LOGGER.error("%s: its thread stopped unexpectedly - starting it again",
+                                  worker.cfg.name)
+                    fresh = self._worker_factory(worker.cfg)
+                    fresh.start()
+                    self.workers[i] = fresh
+                    healed.append(worker.cfg.name)
+                return healed
+        _LOGGER.error("Sync %s stopped unexpectedly - restarting the sync",
+                      "loop" if not thread.is_alive() else "effect player")
+        self.restart(config)
+        return ["synchronizacja"]
 
     def stop(self, timeout: float = 5.0) -> None:
         """Give all bulbs back (restore their state), hand Razer devices back to Synapse."""

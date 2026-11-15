@@ -39,6 +39,22 @@ def setup_logging(verbose: bool) -> None:
         logging.getLogger("tinytuya").setLevel(logging.WARNING)
 
 
+def install_error_logging() -> None:
+    """Any error nobody caught goes to the log (a windowed exe has no console:
+    it would vanish without a trace)."""
+    def log_uncaught(exc_type, exc, tb) -> None:
+        _LOGGER.error("Unexpected error", exc_info=(exc_type, exc, tb))
+
+    def log_thread(args) -> None:
+        if args.exc_type is SystemExit:
+            return
+        _LOGGER.error("Unexpected error in thread %s", getattr(args.thread, "name", "?"),
+                      exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+    sys.excepthook = log_uncaught
+    threading.excepthook = log_thread
+
+
 def running_from_temp(exe: Path) -> bool:
     """Started straight from an archive (WinRAR/7-Zip/Explorer unpack to Temp)?"""
     path = str(exe).lower()
@@ -119,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=__version__)
     args = parser.parse_args(argv)
     setup_logging(args.verbose)
+    install_error_logging()
     _LOGGER.info("TuyaChroma %s starting", __version__)
     if args.selftest_child:
         return selftest_child()

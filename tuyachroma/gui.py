@@ -115,6 +115,9 @@ class App:
         self._notified_version = ""
 
         self.root = new_tk_root()
+        # An error in a button/timer callback: log it, the window keeps working.
+        self.root.report_callback_exception = lambda exc, val, tb: _LOGGER.error(
+            "Error in the window", exc_info=(exc, val, tb))
         self.root.title("TuyaChroma")
         # Sizes below are for 100% scaling; grow them on high-DPI screens.
         self.scale = max(1.0, self.root.winfo_fpixels("1i") / 96)
@@ -1092,9 +1095,81 @@ class App:
         if self._quitting:
             return
         try:
-            self._check_unreachable(time.monotonic())
+            now = time.monotonic()
+            self._check_unreachable(now)
+            self._run_watchdog()
+            self._heal_rejected(now)
         finally:
             self.root.after(30_000, self._watch_unreachable)
+
+    # ----------------------------------------------------------- self-healing
+
+    HEAL_AFTER = 180.0   # a light rejecting connections this long ...
+    HEAL_EVERY = 900.0   # ... gets a repair attempt, at most this often
+
+    def _run_watchdog(self) -> None:
+        """Restart anything that stopped by an unexpected error (see SyncService.heal)."""
+        if not self.config.settings.sync_enabled:
+            return
+
+        def done(healed) -> None:
+            if healed:
+                self.set_busy("Samonaprawa: uruchomiono ponownie " + ", ".join(healed))
+
+        self.run_bg(lambda: self.service.heal(self.config), done, lambda _e: None)
+
+    def _heal_rejected(self, now: float) -> None:
+        """A light that keeps rejecting connections (error 914: wrong key or protocol
+        version): fetch its current key from the account and find its version."""
+        tried = self.__dict__.setdefault("_heal_tried", {})
+        statuses = self.service.bulb_statuses()
+        for dev in self.config.enabled_devices:
+            status = statuses.get(dev.id, "")
+            since = self._fail_since.get(dev.id)
+            if not ("914" in status or "device key" in status) or since is None:
+                continue
+            if now - since < self.HEAL_AFTER or now - tried.get(dev.id, -1e9) < self.HEAL_EVERY:
+                continue
+            tried[dev.id] = now
+            self._heal_light(dev)
+
+    def _heal_light(self, dev: Device) -> None:
+        _LOGGER.info("Self-heal: %s keeps rejecting connections - checking its key and version", dev.name)
+        session = dict(self.config.tuya_session)
+
+        def check():
+            key = dev.local_key
+            if session:
+                from .cloud import fetch_with_session  # noqa: PLC0415
+
+                try:
+                    devices, _s = fetch_with_session(session, self._token_refreshed)
+                    key = next((d.local_key for d in devices if d.id == dev.id), key)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.info("Self-heal: account not available (%s)", err)
+            version = probe_version(dev.id, dev.ip, key, preferred=dev.version) if dev.ip else None
+            return key, version
+
+        def done(result) -> None:
+            key, version = result
+            changes = []
+            if key and key != dev.local_key:
+                dev.local_key = key
+                changes.append("nowy klucz z konta Tuya")
+            if version and version != dev.version:
+                dev.version = version
+                changes.append(f"wersja protokołu {version}")
+            if changes:
+                _LOGGER.info("Self-heal: %s - %s", dev.name, ", ".join(changes))
+                self.set_busy(f"Samonaprawa: {dev.name} – " + ", ".join(changes))
+                self.refresh_devices()
+                self.save_and_apply(bulbs_only=True)
+            else:
+                _LOGGER.warning("Self-heal: %s - key and version are fine; the light itself hangs: "
+                                "switch it off for a few seconds and on", dev.name)
+                self.set_busy(f"{dev.name} nie odpowiada poprawnie – wyłącz ją na kilka sekund i włącz.")
+
+        self.run_bg(check, done, lambda _e: None)
 
     def _check_unreachable(self, now: float) -> None:
         """Routers often give bulbs a new IP (e.g. after a restart): find them again."""

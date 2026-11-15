@@ -199,6 +199,25 @@ Każda zmiana koloru leci do żarówki przez Wi-Fi, a żarówka sama płynnie pr
   * Po kliknięciu program pobiera nową wersję, sprawdza jej **sumę kontrolną SHA-256**, podmienia `TuyaChroma.exe` i uruchamia się ponownie. Żarówki na chwilę wracają do HA i są przejmowane z powrotem. Ustawienia, profile i żarówki zostają.
 * **Baza urządzeń Razer** (jak rozpoznawać urządzenia, układy klawiatur, uwagi) to plik [`data/razer_devices.json`](data/razer_devices.json) w repozytorium. Program codziennie pobiera jej nowszą wersję, także bez aktualizacji programu. Ręcznie zrobisz to przyciskiem *Urządzenia Razer → Aktualizuj bazę urządzeń*. Nowe modele Razer wystarczy dopisać do tego pliku.
 
+## Samonaprawa
+
+Program sam naprawia to, co da się naprawić bez Ciebie:
+
+| Co się stało | Co robi program |
+|---|---|
+| Światło straciło połączenie (wyłączone, Wi-Fi) | łączy się ponownie – najpierw szybko, potem co 15 s; przejmuje je, gdy tylko wróci |
+| Światło dostało nowy adres IP | po minucie szuka go w sieci i zapisuje nowy adres |
+| Światło odrzuca połączenia (błąd 914) przez 3 minuty | pobiera z konta Tuya jego aktualny klucz i sprawdza wersję protokołu; jeśli się zmieniły – stosuje je; jeśli nie – podpowiada, żeby wyłączyć i włączyć światło |
+| Światło zawiesza się w trybie Music | przełącza je na tryb Kolor |
+| Światło znika z sieci regularnie po tym samym czasie | odnawia połączenie zawczasu |
+| Wątek światła albo synchronizacji zatrzymał się przez błąd | strażnik (co 30 s) uruchamia go ponownie |
+| Błąd w pętli synchronizacji | oddaje światła, po 5 s wznawia synchronizację |
+| Gra przejęła urządzenia Razer / aplikacja w tle | oddaje je grze; aplikację bez efektów po minucie pomija |
+| Logowanie do konta Tuya | odnawia je co 30 min |
+| Okno nie startuje (Tcl nie gotowy) | próbuje jeszcze dwa razy |
+
+Każdy nieprzewidziany błąd trafia do logu (`log.txt`), a program działa dalej.
+
 ## Rozwiązywanie problemów
 
 Logi znajdziesz w *Ustawienia → Otwórz folder z logami* (`%APPDATA%\TuyaChroma\log.txt`).
