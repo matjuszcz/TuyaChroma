@@ -73,3 +73,25 @@ def test_heartbeat_also_while_colors_flow(monkeypatch) -> None:
         assert len(bar.sent) > 10 and len(beats) >= 3
     finally:
         worker.stop(2)
+
+
+def test_renewing_is_quiet(monkeypatch, caplog) -> None:
+    _clean(monkeypatch)
+    bulbs._max_age["q"] = 0.2
+    statuses = []
+    worker = BulbWorker(BulbConfig(name="bar", id="q", ip="1", local_key="k", min_interval=0.02),
+                        device_factory=lambda _cfg: FakeBulb(music=False))
+    with caplog.at_level("INFO", logger="tuyachroma.bulbs"):
+        worker.start()
+        try:
+            assert wait_for(lambda: worker.connected)
+            worker.set_color((255, 0, 0))
+            end = time.monotonic() + 1.0
+            while time.monotonic() < end:
+                statuses.append(worker.status)
+                time.sleep(0.005)
+        finally:
+            worker.stop(2)
+    connects = [r for r in caplog.records if "connected (type" in r.message and r.levelname == "INFO"]
+    assert len(connects) == 1  # only the first connection is logged
+    assert bulbs.STATUS_CONNECTING not in statuses[statuses.index(bulbs.STATUS_SYNC):]

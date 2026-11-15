@@ -268,11 +268,13 @@ class BulbWorker(threading.Thread):
 
     def run(self) -> None:
         failures = 0
+        renewing = False
         while not self._stopping.is_set():
             try:
-                if not failures:
+                if not failures and not renewing:
                     self.status = STATUS_CONNECTING
-                self._connect()
+                self._connect(quiet=renewing)
+                renewing = False
                 if failures:
                     _LOGGER.info("%s: reachable again", self.cfg.name)
                 failures = 0
@@ -282,6 +284,7 @@ class BulbWorker(threading.Thread):
                     self._loop()
                 except _Renew:
                     _LOGGER.debug("%s: renewing the connection", self.cfg.name)
+                    renewing = True  # no "connecting" status, no log line every time
                     self._disconnect()
                     continue
                 except Exception as err:  # noqa: BLE001
@@ -323,7 +326,7 @@ class BulbWorker(threading.Thread):
             _LOGGER.warning("%s: could not restore state: %s", self.cfg.name, err)
         self._disconnect()
 
-    def _connect(self) -> None:
+    def _connect(self, quiet: bool = False) -> None:
         dev = self._factory(self.cfg)
         status = dev.status()
         if isinstance(status, dict) and str(status.get("Err")) in OFFLINE_ERRORS:
@@ -346,7 +349,8 @@ class BulbWorker(threading.Thread):
         # _in_sync_mode survives reconnects: the bulb may still show our color.
         self.connected = True
         self.status = STATUS_SYNC if self._in_sync_mode else STATUS_READY
-        _LOGGER.info(
+        _LOGGER.log(
+            logging.DEBUG if quiet else logging.INFO,
             "%s: connected (type %s, %s mode, DPs %s)", self.cfg.name, dev.bulb_type,
             "music" if self.use_music else "colour", ",".join(self.dps),
         )

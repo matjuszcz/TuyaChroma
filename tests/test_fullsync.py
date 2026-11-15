@@ -517,3 +517,49 @@ def test_full_sync_hands_razer_devices_to_a_game(monkeypatch) -> None:
         assert not service.player.yielded and not service.game_active
     finally:
         service.stop()
+
+
+def test_background_chroma_app_does_not_block_full_sync(monkeypatch) -> None:
+    """A Chroma app that never shows an effect (e.g. a wallpaper program) is not a game."""
+    from tuyachroma import winsys
+
+    monkeypatch.setattr(engine, "GAME_PROBATION", 0.3)
+    monkeypatch.setattr(winsys, "process_alive", lambda pid: pid == 55)
+    dll = FakeDll()
+
+    class Reader:
+        def __init__(self, sources):
+            pass
+
+        def wait(self, ms):
+            time.sleep(0.005)
+
+        def read(self, src):
+            return Frame(src, 7, [(1, 1, 1)] * DEVICES[src].count, 1)
+
+        def read_apps(self):  # the background app is listed but Synapse shows us
+            return ChromaApps(current_pid=OWN, apps={OWN: "TuyaChroma.exe", 55: "wallpaper.exe"})
+
+        def close(self):
+            pass
+
+    service = engine.SyncService(
+        reader_factory=Reader, worker_factory=lambda c: Recorder(c), service_check=lambda: True,
+        output_factory=lambda: NativeChroma(dll), own_pid=OWN, screen_factory=lambda: None)
+    config = AppConfig(devices=[Device(id="a", name="a", local_key="k", ip="1.1.1.1", enabled=True)])
+    config.settings.idle = "full"
+    service.start(config)
+    try:
+        end = time.time() + 2
+        while time.time() < end and not service.player.yielded:
+            time.sleep(0.01)
+        assert service.player.yielded and "oddane grze" in service.razer_status  # on trial
+        end = time.time() + 3
+        while time.time() < end and (service.player.yielded or dll.calls.count(("Init",)) < 2):
+            time.sleep(0.01)
+        assert not service.player.yielded and dll.calls.count(("Init",)) >= 2  # devices taken back
+        time.sleep(0.5)
+        assert not service.player.yielded  # and it stays that way
+        assert "pełna synchronizacja" in service.razer_status
+    finally:
+        service.stop()

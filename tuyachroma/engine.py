@@ -77,6 +77,32 @@ def other_chroma_apps(apps: ChromaApps | None, own_pid: int,
             if pid != own_pid and not any(n in name.lower() for n in NOT_GAMES) and alive(pid)}
 
 
+class AliveCache:
+    """process_alive with results kept for a moment (it is asked every frame)."""
+
+    def __init__(self, alive: Callable[[int], bool] | None = None, ttl: float = 2.0) -> None:
+        self._alive = alive
+        self._ttl = ttl
+        self._seen: dict[int, tuple[float, bool]] = {}
+
+    def __call__(self, pid: int) -> bool:
+        now = time.monotonic()
+        hit = self._seen.get(pid)
+        if hit is None or now - hit[0] > self._ttl:
+            alive = self._alive
+            if alive is None:
+                from .winsys import process_alive as alive  # noqa: PLC0415
+            hit = (now, bool(alive(pid)))
+            self._seen[pid] = hit
+        return hit[1]
+
+
+# A newly seen Chroma app gets the Razer devices for this long; if it shows no
+# effect in that time it is a background app (e.g. a wallpaper program), not a
+# game, and the program takes the devices back and ignores it.
+GAME_PROBATION = 60.0  # games may show effects only after loading
+
+
 def is_game_active(frames: dict[str, Frame | None], apps: ChromaApps | None,
                    own_pid: int, full_sync: bool) -> bool:
     """Does a game (another Chroma app) control the lighting right now?"""
@@ -206,6 +232,7 @@ class SyncService:
         self.razer_status = "zatrzymane"
         self.game_active = False
         self.game_name = ""
+        self.other_apps: dict[int, str] = {}  # running Chroma apps treated as games
         self._profile: Profile | None = None
         self._sources: list[str] = []
         # Workers still giving their bulb back after a stop/update. A new
@@ -459,6 +486,10 @@ class SyncService:
         last_error = ""
         last_others: dict[int, str] = {}
         was_game = False
+        alive = AliveCache()
+        on_trial: dict[int, float] = {}   # pid -> when we handed it the devices
+        background: set[int] = set()      # Chroma apps that never showed an effect
+        self.other_apps = {}
         try:
             while not self._stop.is_set():
                 try:
@@ -494,14 +525,35 @@ class SyncService:
                         warned_no_apps = True
                         _LOGGER.warning("Synapse's Chroma app list is not available: games can't be "
                                         "told apart from our own effect in full sync mode")
-                    others = other_chroma_apps(apps, self._own_pid)
+                    others = other_chroma_apps(apps, self._own_pid, alive)
                     if others != last_others:
                         _LOGGER.info("Chroma apps running: %s",
                                      ", ".join(f"{n} ({p})" for p, n in others.items()) or "none besides us")
                         last_others = others
+                    now = time.monotonic()
+                    any_active = any(f is not None and f.active for f in frames.values())
+                    current = apps.current_pid if apps is not None else 0
+                    if not full_sync:
+                        on_trial.clear()  # we don't hold the Razer devices: nothing to hand over
+                    for pid in list(on_trial) if full_sync else []:
+                        if pid not in others:
+                            del on_trial[pid]
+                        elif current == pid and any_active:
+                            on_trial[pid] = float("inf")  # shows its effect: a game, keep it
+                        elif now - on_trial[pid] > GAME_PROBATION:
+                            del on_trial[pid]
+                            background.add(pid)
+                            _LOGGER.info("%s shows no Chroma effect - a background app, taking the "
+                                         "Razer devices back", others[pid])
+                    background &= set(others)
+                    for pid in others if full_sync else []:
+                        if pid not in on_trial and pid not in background:
+                            on_trial[pid] = now
+                    games = {p: n for p, n in others.items() if p not in background}
+                    self.other_apps = games
                     if self.player is not None:
                         # Full sync: a game is running - hand it the Razer devices.
-                        self.player.yielded = full_sync and bool(others)
+                        self.player.yielded = full_sync and bool(games)
                     self.game_active = is_game_active(frames, apps, self._own_pid, full_sync)
                     self.game_name = apps.current_name if (self.game_active and apps) else ""
                     if self.game_active != was_game:
@@ -563,6 +615,9 @@ class SyncService:
             return f"efekt z gry aktywny{name}"
         if idle == "full":
             player = self.player
+            if player is not None and player.yielded:
+                names = ", ".join(getattr(self, "other_apps", {}).values())
+                return f"gra działa ({names}) – urządzenia Razer oddane grze"
             if player is not None and "niedostępne" in player.output_status:
                 return player.output_status  # e.g. Chroma Apps disabled in Synapse
             return f"pełna synchronizacja – profil „{profile_name}”"
