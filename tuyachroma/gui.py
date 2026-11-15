@@ -80,6 +80,21 @@ SPEED_LABELS = {
 RAZER_GREEN = "#44d62c"
 
 
+def new_tk_root(attempts: int = 3) -> tk.Tk:
+    """tk.Tk() that retries: on Windows, starting Tcl now and then fails to read
+    its own library files ("Can't find a usable init.tcl", "invalid command
+    name tcl_findLibrary") and works a moment later."""
+    for attempt in range(attempts):
+        try:
+            return tk.Tk()
+        except tk.TclError as err:
+            if attempt == attempts - 1:
+                raise
+            _LOGGER.warning("Window system not ready (%s), retrying", str(err).splitlines()[0])
+            time.sleep(0.5)
+    raise RuntimeError("unreachable")
+
+
 def _label_to_key(labels: dict[str, str], label: str) -> str:
     return next((k for k, v in labels.items() if v == label), label)
 
@@ -99,7 +114,7 @@ class App:
         self.available_release: updater.Release | None = None
         self._notified_version = ""
 
-        self.root = tk.Tk()
+        self.root = new_tk_root()
         self.root.title("TuyaChroma")
         # Sizes below are for 100% scaling; grow them on high-DPI screens.
         self.scale = max(1.0, self.root.winfo_fpixels("1i") / 96)

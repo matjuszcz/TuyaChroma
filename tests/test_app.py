@@ -988,3 +988,23 @@ def test_saving_settings_restarts_only_when_needed(tmp_path, monkeypatch) -> Non
         assert applied == [False]
     finally:
         app.root.destroy()
+
+
+def test_window_creation_retries(monkeypatch) -> None:
+    """CI (Windows): Tcl sometimes fails to start and works a moment later."""
+    from tuyachroma import gui
+
+    calls = []
+
+    def flaky_tk():
+        calls.append(1)
+        if len(calls) < 3:
+            raise gui.tk.TclError("Can't find a usable init.tcl in the following directories")
+        return "root"
+
+    monkeypatch.setattr(gui.tk, "Tk", flaky_tk)
+    monkeypatch.setattr(gui.time, "sleep", lambda s: None)
+    assert gui.new_tk_root() == "root" and len(calls) == 3
+    calls.clear()
+    with pytest.raises(gui.tk.TclError):
+        gui.new_tk_root(attempts=2)
