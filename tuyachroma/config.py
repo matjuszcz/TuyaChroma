@@ -75,7 +75,10 @@ class Settings:
     idle: str = "effect"  # see IDLE_MODES
     profiles: list[Profile] = field(default_factory=default_profiles)
     active_profile: str = "Wave"
-    bulb_effect_rate: float = 1.0  # bulb color changes per second while a profile plays
+    # precise: each bulb computes the effect color when sending, as often as its
+    # "Szybkość zmian" allows; ticks: all bulbs change bulb_effect_rate times/s
+    effect_sync: str = "precise"
+    bulb_effect_rate: float = 1.0  # bulb color changes per second ("ticks" mode)
     keyboard_layout: str = "auto"  # auto (detected) | full | tkl | mini (60%)
     auto_update: bool = True  # check for program and device database updates daily
     # Effects: send bulbs their color ahead of time to make up for their delay.
@@ -200,6 +203,8 @@ def load(path: Path | None = None) -> AppConfig:
     if settings.active_profile not in {p.name for p in settings.profiles}:
         settings.active_profile = settings.profiles[0].name
     settings.bulb_effect_rate = max(0.5, min(5.0, float(settings.bulb_effect_rate)))
+    if settings.effect_sync not in ("precise", "ticks"):
+        settings.effect_sync = "precise"
     if settings.keyboard_layout not in ("auto", "full", "tkl", "mini"):
         settings.keyboard_layout = "auto"
     if settings.latency_mode not in ("auto", "manual", "off"):

@@ -7,6 +7,7 @@ color is sent (older ones are dropped), at most once per ``min_interval``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 import logging
 import threading
 import time
@@ -127,12 +128,29 @@ class BulbWorker(threading.Thread):
         self.slow_interval = _learned_slow.get(cfg.id, 0.0)
         self._last_problem = 0.0
         self._send_count = 0
+        self._source_key: Any = None
 
     # ------------------------------------------------------------ public API
 
     def set_color(self, rgb: RGB) -> None:
         with self._lock:
             self._target = rgb
+            self._source_key = None
+            self._restore_requested = False
+        self._wake.set()
+
+    def set_color_source(self, source: Callable[[], RGB], key: Any = None) -> None:
+        """Follow a moving effect: ``source()`` gives the color for "now".
+
+        It is called right before each send, so the color is as fresh as it can
+        be, as often as this bulb's rate allows. Calls with the same ``key`` as
+        the current source are ignored (the engine calls this every frame).
+        """
+        with self._lock:
+            if key is not None and key == self._source_key and callable(self._target):
+                return
+            self._target = source
+            self._source_key = key
             self._restore_requested = False
         self._wake.set()
 
@@ -249,7 +267,8 @@ class BulbWorker(threading.Thread):
                 self._restore_requested = True
                 self._wake.set()
         while not self._stopping.is_set():
-            self._wake.wait(timeout=5)
+            following = callable(self._target)
+            self._wake.wait(timeout=self._interval() if following else 5)
             self._wake.clear()
             if self._stopping.is_set():
                 return
@@ -271,11 +290,17 @@ class BulbWorker(threading.Thread):
                 halved = self.slow_interval / 2
                 self.slow_interval = max(floor, halved if halved > 0.1 else 0.0)
                 self._last_problem = now
-            wait = max(self.cfg.min_interval, self.slow_interval) - (now - last_send)
+            wait = self._interval() - (now - last_send)
             if wait > 0:
                 self._stopping.wait(wait)
                 self._wake.set()  # re-check the newest target after the pause
                 continue
+            if callable(target):
+                try:
+                    target = target()  # the effect's color for this very moment
+                except Exception as err:  # noqa: BLE001 - e.g. the effect was just stopped
+                    _LOGGER.debug("%s: effect color: %s", self.cfg.name, err)
+                    continue
             if (self._sent is not None and distance(self._sent, target) < 3
                     and now - last_send < REFRESH_EVERY):
                 continue
@@ -319,6 +344,9 @@ class BulbWorker(threading.Thread):
         self.status = STATUS_SYNC
         self._sent = rgb
         self._send_count += 1
+
+    def _interval(self) -> float:
+        return max(self.cfg.min_interval, self.slow_interval)
 
     def _slow_down(self, dropped_off: bool = False) -> None:
         """The bulb stopped confirming colors: send them less often for a while."""

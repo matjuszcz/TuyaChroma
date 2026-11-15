@@ -364,6 +364,7 @@ class App:
         self.set_idle = tk.StringVar(value=s.idle)
         self.set_fps = tk.IntVar(value=int(s.fps))
         self.set_bulb_rate = tk.DoubleVar(value=s.bulb_effect_rate)
+        self.set_effect_sync = tk.StringVar(value=s.effect_sync)
         self.set_layout = tk.StringVar(value=LAYOUT_LABELS[s.keyboard_layout])
         ttk.Checkbutton(tab, text="Uruchamiaj razem z Windows (przejmuj żarówki po włączeniu komputera)",
                         variable=self.set_autostart).pack(anchor="w")
@@ -374,9 +375,15 @@ class App:
             ttk.Radiobutton(tab, text=IDLE_LABELS[mode], value=mode, variable=self.set_idle).pack(anchor="w", padx=12)
         ttk.Label(tab, foreground="#666", wraplength=self.px(780), justify="left",
                   text="Efekt wybierasz w zakładce „Profile efektów”.").pack(anchor="w", padx=12, pady=(2, 0))
+        ttk.Label(tab, text="Synchronizacja kolorów żarówek w efektach:").pack(anchor="w", pady=(12, 0))
+        ttk.Radiobutton(
+            tab, value="precise", variable=self.set_effect_sync,
+            text="Dokładna – kolor liczony w chwili wysłania, tak często, jak pozwala „Szybkość zmian” żarówki",
+        ).pack(anchor="w", padx=12)
         row = ttk.Frame(tab)
-        row.pack(anchor="w", pady=(12, 0))
-        ttk.Label(row, text="Zmiany koloru żarówek w efektach (na sekundę):").pack(side="left")
+        row.pack(anchor="w", padx=12)
+        ttk.Radiobutton(row, value="ticks", variable=self.set_effect_sync,
+                        text="Oszczędna – wszystkie żarówki razem, zmian na sekundę:").pack(side="left")
         ttk.Spinbox(row, from_=0.5, to=5, increment=0.5, textvariable=self.set_bulb_rate, width=5).pack(side="left", padx=6)
         ttk.Label(row, text="(1 = oszczędnie dla żarówek, 3–5 = płynniej)", foreground="#666").pack(side="left")
         row = ttk.Frame(tab)
@@ -1182,6 +1189,7 @@ class App:
             s.bulb_effect_rate = max(0.5, min(5.0, float(self.set_bulb_rate.get())))
         except (tk.TclError, ValueError):
             s.bulb_effect_rate = 1.0
+        s.effect_sync = self.set_effect_sync.get() if self.set_effect_sync.get() in ("precise", "ticks") else "precise"
         s.auto_update = self.set_auto_update.get()
         s.latency_mode = self.set_latency_mode.get()
         try:

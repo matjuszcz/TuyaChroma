@@ -148,3 +148,73 @@ def test_profile_change_reaches_bulbs_at_once() -> None:
     assert clock.allow(lamp) and not clock.allow(lamp)
     clock.reset()  # new profile: no waiting for the next tick
     assert clock.allow(lamp) and not clock.allow(lamp)
+
+
+def test_precise_bulb_computes_color_when_sending() -> None:
+    """Precise sync: the color is computed right before each send, at the bulb's rate."""
+    bulb = FakeBulb(music=False)
+    cfg = BulbConfig(name="l", id="p1", ip="1", local_key="k", min_interval=0.05)
+    worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
+    worker.start()
+    assert wait_for(lambda: worker.connected)
+    asked = []
+
+    def source():
+        t = time.monotonic()
+        asked.append(t)
+        return (int(t * 1000) % 200 + 20, 10, 10)  # changes all the time
+
+    try:
+        worker.set_color_source(source, key="spectrum")
+        assert wait_for(lambda: len(bulb.sent) >= 6, 3)
+        for _ in range(5):
+            worker.set_color_source(lambda: (0, 0, 0), key="spectrum")  # same key: ignored
+        n = len(bulb.sent)
+        assert wait_for(lambda: len(bulb.sent) >= n + 3)
+        sent_colors = [v["24"] for kind, v in bulb.sent if kind == "multi" and "24" in v]
+        assert len(set(sent_colors)) >= 6  # a fresh color each time
+        assert FakeBulb.hex_for((1, 1, 1)) not in sent_colors  # the same-key source was ignored
+        worker.set_color((255, 0, 0))  # a game takes over: fixed color again
+        assert wait_for(lambda: bulb.sent[-1][1].get("24") == FakeBulb.hex_for((255, 0, 0)))
+        calls = len(asked)
+        time.sleep(0.3)
+        assert len(asked) == calls  # the effect source is no longer used
+    finally:
+        worker.stop(2)
+
+
+def test_precise_source_error_does_not_break_the_bulb() -> None:
+    bulb = FakeBulb(music=False)
+    cfg = BulbConfig(name="l", id="p2", ip="1", local_key="k", min_interval=0.05)
+    worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
+    worker.start()
+    assert wait_for(lambda: worker.connected)
+    try:
+        worker.set_color_source(lambda: 1 / 0, key="broken")
+        time.sleep(0.3)
+        assert worker.connected and worker.is_alive()
+        worker.set_color((0, 255, 0))
+        assert wait_for(lambda: len(bulb.sent) >= 1)
+    finally:
+        worker.stop(2)
+
+
+def test_precise_bulbs_match_each_other_and_the_keyboard() -> None:
+    """Every bulb and the Razer devices draw from one clock: same moment, same color."""
+    service = engine.SyncService(layout_detector=lambda: "full", own_pid=1)
+    renderer = Renderer(Profile(effect="spectrum", speed=5))
+    service.player = SimpleNamespace(renderer=renderer)
+    settings = AppConfig().settings
+    settings.latency_mode = "off"
+    lamps = [SimpleNamespace(latency_ms=None, cfg=BulbConfig(
+        name=f"l{i}", id=str(i), ip="1", local_key="k", min_brightness=0)) for i in range(3)]
+    sources = [service._bulb_effect_source(w, i, 3, settings, renderer.profile, key="k")[1]
+               for i, w in enumerate(lamps)]
+    real = time.monotonic
+    try:
+        time.monotonic = lambda: 1234.5  # one moment
+        colors = [src() for src in sources]
+        keyboard = Renderer(Profile(effect="spectrum", speed=5)).device_frame("keyboard", 1234.5)[0]
+    finally:
+        time.monotonic = real
+    assert colors[0] == colors[1] == colors[2] == keyboard

@@ -147,7 +147,10 @@ Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life 
   * *Profil tylko na żarówkach* (domyślnie);
   * *Oddaj żarówki do HA*;
   * *Zostaw ostatni kolor z gry*.
-* **Zmiany koloru żarówek w efektach:** domyślnie 1 na sekundę, oszczędnie dla żarówek. Ustaw 3–5, jeśli chcesz płynniej. Wszystkie żarówki zmieniają kolor w tym samym takcie (wspólny zegar), więc w danej chwili pokazują ten sam moment efektu, nawet jeśli połączyły się w różnym czasie; żarówka, która połączy się później, od razu dołącza do pozostałych. Żarówka trzyma jeden kolor przez cały takt, a urządzenia Razer zmieniają się płynnie, dlatego dostaje kolor ze środka taktu: przy 1 zmianie na sekundę różni się od klawiatury najwyżej o pół sekundy efektu, przy 4 zmianach – o 1/8 s. Po zmianie profilu żarówki przełączają się od razu, razem z urządzeniami Razer.
+* **Synchronizacja kolorów żarówek w efektach:**
+  * **Dokładna** (domyślnie): urządzenia Razer i wszystkie żarówki liczą efekt z jednego zegara. Każda żarówka wylicza swój kolor dopiero w chwili wysłania, dla momentu, w którym go pokaże (teraz + jej zmierzone opóźnienie), i dostaje nowy kolor tak często, jak pozwala jej *Szybkość zmian* (domyślnie do 7 razy na sekundę). W danej chwili wszystko pokazuje ten sam moment efektu. Po zmianie profilu żarówki przełączają się od razu, razem z urządzeniami Razer.
+  * **Oszczędna**: wszystkie żarówki zmieniają kolor razem, ustaloną liczbę razy na sekundę (np. 1). Każda dostaje kolor ze środka taktu, więc od klawiatury różni się najwyżej o pół taktu. Mniej ruchu w sieci, ale kolory są mniej dokładne.
+  * Zostają różnice, na które program nie ma wpływu: każdy model żarówki sam płynnie przechodzi do nowego koloru i trochę inaczej oddaje barwy niż diody Razer. Jeśli jakaś żarówka wyraźnie się spóźnia, ustaw jej *Korektę opóźnienia*.
 
 ### 6. Opóźnienie synchronizacji
 

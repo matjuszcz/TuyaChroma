@@ -83,6 +83,7 @@ def dispatch(
     allow_effect: Callable[[Any], bool] = lambda _w: True,
     keyboard_area=None,
     effect_color: Callable[[Any, int, int], RGB] | None = None,
+    effect_source: Callable[[Any, int, int], tuple[Any, Callable[[], RGB]]] | None = None,
 ) -> bool:
     """Send colors to the bulb workers. Returns True if a game color was used."""
     used_game = False
@@ -91,6 +92,12 @@ def dispatch(
         if game_active and frame is not None and frame.active:
             worker.set_color(bulb_color(worker.cfg, frame, keyboard_area))
             used_game = True
+        elif idle in ("full", "effect") and effect_source is not None:
+            key, source = effect_source(worker, index, len(workers))
+            if hasattr(worker, "set_color_source"):
+                worker.set_color_source(source, key)  # the bulb computes the color when sending
+            else:
+                worker.set_color(source())
         elif idle in ("full", "effect") and effect_color is not None:
             if allow_effect(worker):  # bulbs change at most bulb_effect_rate times per second
                 worker.set_color(effect_color(worker, index, len(workers)))
@@ -378,6 +385,20 @@ class SyncService:
         colors = renderer.frame(f"{cfg.source}@{cfg.id}", spec.width, spec.height, t)
         return zone_color(cfg, colors, KEYBOARD_AREAS[self.keyboard_layout])
 
+    def _bulb_effect_source(self, worker, index: int, count: int, settings, profile, key):
+        """(key, color function) for a bulb that computes its color when sending.
+
+        All bulbs and the Razer devices draw the effect from one clock
+        (time.monotonic); each bulb asks for the color of the moment it will
+        show it (now + its delay), as often as it can take colors.
+        """
+        layout = self.keyboard_layout
+
+        def color() -> RGB:
+            return self._bulb_effect_color(worker, index, count, settings, profile)
+
+        return (key, index, count, layout, worker.cfg.min_interval), color
+
     # ---------------------------------------------------------------- thread
 
     def _release_all(self) -> None:
@@ -442,20 +463,24 @@ class SyncService:
                     self.player.paused = self.game_active
                     profile_frames, strip = self.player.latest()
                 profile = self._profile or settings.profile
-                effect_color = None
+                effect_color = effect_source = None
                 clock.update(time.monotonic())
                 key = dataclasses.astuple(profile)  # any change in the profile
                 if key != last_profile:
                     if last_profile is not None:
                         clock.reset()
                     last_profile = key
-                if self.player is not None:
-                    # every bulb shows the effect at the same moment: the tick's start
+                if self.player is not None and settings.effect_sync == "precise":
+                    effect_source = functools.partial(self._bulb_effect_source,
+                                                      settings=settings, profile=profile, key=key)
+                elif self.player is not None:
+                    # every bulb shows the effect at the same moment: the tick's middle
                     effect_color = functools.partial(self._bulb_effect_color,
                                                      settings=settings, profile=profile,
                                                      at=clock.time)
                 dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
-                         profile, clock.allow, KEYBOARD_AREAS[self.keyboard_layout], effect_color)
+                         profile, clock.allow, KEYBOARD_AREAS[self.keyboard_layout], effect_color,
+                         effect_source)
                 self.razer_status = self._status_text(idle, profile.name)
                 spent = time.monotonic() - started
                 if spent < period:

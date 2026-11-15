@@ -46,6 +46,12 @@ class FakeBulb:
     def close(self):
         self.closed = True
 
+    @staticmethod
+    def hex_for(rgb):
+        import tinytuya
+
+        return tinytuya.BulbDevice.rgb_to_hexvalue(*rgb, "hsv16")
+
 
 def wait_for(cond, timeout=2.0):
     end = time.monotonic() + timeout
