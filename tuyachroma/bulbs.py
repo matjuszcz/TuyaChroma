@@ -135,6 +135,7 @@ class BulbWorker(threading.Thread):
         self._send_count = 0
         self._source_key: Any = None
         self.dps: list[str] = []  # data points the bulb reported over the LAN
+        self._reported = False
 
     # ------------------------------------------------------------ public API
 
@@ -255,6 +256,9 @@ class BulbWorker(threading.Thread):
             "%s: connected (type %s, %s mode, DPs %s)", self.cfg.name, dev.bulb_type,
             "music" if self.use_music else "colour", ",".join(self.dps),
         )
+        if not self._reported:
+            self._reported = True
+            _LOGGER.info("%s: state %s", self.cfg.name, status["dps"])
 
     def _disconnect(self) -> None:
         self.connected = False

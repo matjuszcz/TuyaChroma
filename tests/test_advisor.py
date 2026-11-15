@@ -78,3 +78,32 @@ def test_worker_reports_its_data_points() -> None:
         assert worker.dps == ["20", "21", "22", "23", "24"]
     finally:
         worker.stop(2)
+
+
+GU10_CODES = ["bright_value_v2", "colour_data_v2", "control_data", "countdown_1", "music_data",
+              "scene_data_v2", "switch_led", "temp_value_v2", "work_mode"]
+BAR_CODES = ["colour_data", "countdown", "music_data", "switch_led", "work_mode"]
+
+
+def test_real_setup_from_a_log() -> None:
+    """The user's lights (1.8.0 log): short, readable advice only for lights Razer controls."""
+    devices = [
+        dev("tv", name="Lampa TV", enabled=False, codes=GU10_CODES),
+        dev("lb", name="Lampka Biurko", category="dd", product_name="Battletron Light Bar",
+            codes=BAR_CODES, min_interval=0.5),
+        dev("ls", name="Led Strip", category="dd", product_name="Battletron Smart desk light Strip",
+            codes=BAR_CODES),
+        dev("b1", name="RGB Biuro 1", codes=GU10_CODES),
+        dev("j1", name="RGB Jadalnia 1", enabled=False, ip="", codes=GU10_CODES),
+    ]
+    bar = {"status": bulbs.STATUS_SYNC, "latency_ms": 11, "dps": ["20", "21", "24", "26", "47", "53"]}
+    details = {"lb": dict(bar, dropped_off=0.3), "ls": dict(bar, dps=bar["dps"] + ["34"]),
+               "b1": {"status": bulbs.STATUS_SYNC, "latency_ms": 70,
+                      "dps": ["20", "21", "22", "23", "24", "25", "26", "34"]}}
+    advice = advisor.advise(devices, details)
+    assert advice.changes == []  # Lampka Biurko is already on "wolno"
+    text = "\n".join(advice.notes)
+    assert "Lampa TV" not in text and "Jadalnia" not in text  # not controlled by Razer
+    assert text.count("Tryb Music") == 1 and "Lampka Biurko, Led Strip, RGB Biuro 1" in text
+    assert "możliwe, że to RGBIC" in text  # DP 53 without confirmation from the account
+    assert len(advice.report) == 5  # the report still lists everything

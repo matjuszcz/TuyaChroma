@@ -59,6 +59,7 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
     changes: list[Change] = []
     notes: list[str] = []
     report: list[str] = []
+    music: list[str] = []
     for dev in devices:
         info = details.get(dev.id, {})
         codes = set(getattr(dev, "codes", []) or [])
@@ -100,22 +101,29 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
                     f"{why} – Szybkość zmian: {_speed_label(dev.min_interval)} → {_speed_label(target)}"))
 
         # 3. Things to know, no automatic change.
-        segmented = bool(codes & SEGMENT_CODES) or (
-            dev.category in STRIP_CATEGORIES and bool({"51", "53", "61"} & set(dps)))
-        if segmented:
+        if not dev.enabled:
+            continue  # only the lights Razer controls get notes
+        if codes & SEGMENT_CODES:
             notes.append(f"{dev.name}: listwa z osobno sterowanymi diodami (RGBIC). Program steruje nią "
                          "jednym kolorem; fala wzdłuż listwy wymaga obsługi segmentów (planowana).")
+        elif dev.category in STRIP_CATEGORIES and {"51", "53", "61"} & set(dps):
+            notes.append(f"{dev.name}: listwa ma dodatkowe funkcje spoza standardu Tuya (DP "
+                         f"{','.join(sorted({'51', '53', '61'} & set(dps)))}) – możliwe, że to RGBIC, "
+                         "ale konto Tuya tego nie potwierdza. Program steruje nią jednym kolorem.")
         elif dev.category in STRIP_CATEGORIES:
             notes.append(f"{dev.name}: zwykła listwa RGB – cała świeci jednym kolorem, w efekcie Wave "
                          "jest jednym punktem fali razem z żarówkami.")
         if codes & MUSIC_CODES and dev.method == "colour":
-            notes.append(f"{dev.name}: obsługuje tryb Music (kolor zmienia się od razu, bez płynnego "
-                         "przejścia). Możesz go wypróbować w ustawieniach żarówki → Tryb i kliknąć Testuj.")
+            music.append(dev.name)
         if status == STATUS_OFFLINE or status.startswith("błąd"):
             notes.append(f"{dev.name}: teraz nieosiągalna ({status}). Jeśli jest włączona, kliknij "
                          "„Szukaj w sieci”.")
         if not dev.ip:
             notes.append(f"{dev.name}: brak adresu IP – kliknij „Szukaj w sieci”.")
+    if music:
+        notes.append("Tryb Music (kolor zmienia się od razu, bez płynnego przejścia) obsługują: "
+                     f"{', '.join(music)}. Możesz go wypróbować w ustawieniach żarówki → Tryb, "
+                     "a potem kliknąć Testuj.")
     if settings is not None and getattr(settings, "effect_sync", "precise") != "precise":
         notes.append("Ustawienia: synchronizacja kolorów jest w trybie „Oszczędna”. Dla najdokładniejszych "
                      "kolorów wybierz „Dokładna”.")
