@@ -103,3 +103,59 @@ def test_scene_setting_saved(tmp_path) -> None:
     assert dev.bulb_config().scene == WAVE_STATE
     dev.use_scene = False
     assert dev.bulb_config().scene is None
+
+
+def test_scene_sent_again_after_the_light_reboots(monkeypatch) -> None:
+    """Battletron lights reboot now and then: their effect must come back."""
+    from tuyachroma.bulbs import BulbOffline
+
+    class RebootingBar(FakeBulb):
+        reboot = False
+
+        def set_multiple_values(self, values, nowait=False):
+            super().set_multiple_values(values, nowait)
+
+        def heartbeat(self, nowait=False):
+            if RebootingBar.reboot:
+                RebootingBar.reboot = False
+                raise BulbOffline("gone")
+
+    monkeypatch.setattr(bulbs, "HEARTBEAT_EVERY", 0.1)
+    bar = RebootingBar(music=False)
+    worker = BulbWorker(BulbConfig(name="bar", id="rb", ip="1", local_key="k", min_interval=0.02),
+                        device_factory=lambda _cfg: bar)
+    import time
+    worker.start()
+    assert wait_for(lambda: worker.connected)
+    try:
+        worker.set_scene(NativeScene.from_state(WAVE_STATE))
+        assert wait_for(lambda: worker.status == bulbs.STATUS_SCENE)
+        scenes = lambda: sum(1 for kind, v in bar.sent if v.get("21") == "scene")  # noqa: E731
+        assert scenes() == 1
+        RebootingBar.reboot = True  # the next heartbeat finds it gone
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and scenes() < 2:
+            time.sleep(0.05)
+        assert scenes() == 2  # reconnected and the light got its effect again
+    finally:
+        worker.stop(2)
+
+
+def test_music_mode_restored_after_scene() -> None:
+    bulb = FakeBulb(music=True)
+    worker = BulbWorker(BulbConfig(name="m", id="mm", ip="1", local_key="k", min_interval=0.02,
+                                   method="music"), device_factory=lambda _cfg: bulb)
+    worker.start()
+    assert wait_for(lambda: worker.connected)
+    try:
+        worker.set_color((255, 0, 0))
+        assert wait_for(lambda: any(k == "music" for k, _ in bulb.sent))
+        worker.set_scene(NativeScene.from_state(WAVE_STATE))
+        assert wait_for(lambda: worker.status == bulbs.STATUS_SCENE)
+        n = len(bulb.sent)
+        worker.set_color((0, 0, 255))
+        assert wait_for(lambda: len(bulb.sent) >= n + 2)
+        assert bulb.sent[n] == ("multi", {"20": True, "21": "music"})  # back to music mode first
+        assert bulb.sent[n + 1][0] == "music"
+    finally:
+        worker.stop(2)

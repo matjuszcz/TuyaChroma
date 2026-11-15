@@ -805,7 +805,10 @@ class App:
                     f"1. Otwórz aplikację Tuya / Smart Life i ustaw na „{dev.name}” efekt, który ma "
                     "się włączać w profilach Wave, Spectrum i Koło (np. falę).\n"
                     "2. Gdy listwa go pokazuje, kliknij OK.\n\n"
-                    "Program na ten czas nie wysyła do niej kolorów."):
+                    "Program na ten czas nie wysyła do niej kolorów.\n\n"
+                    "Uwaga: taki efekt listwa animuje sama, w swoim tempie – w tych profilach "
+                    "nie będzie zsynchronizowana z urządzeniami Razer (w grach i pozostałych "
+                    "profilach nadal będzie)."):
                 if worker is not None:
                     worker.hold(False)
                 return

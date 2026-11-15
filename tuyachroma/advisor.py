@@ -36,9 +36,10 @@ PRODUCT_HINTS = {
     "battletron": (0.3, "Battletron (Action / LSC Smart): przy kolorach częściej niż co ok. 0,2 s "
                         "zaczyna gubić polecenia i potrafi się zawiesić. Ma 20 segmentów, ale każdy "
                         "trzeba ustawiać osobno (ok. 0,25 s na segment, cała listwa ok. 5 s), więc "
-                        "program nie zrobi na niej płynnej fali (steruje nią jednym kolorem). Listwa "
-                        "ma za to własną falę: ustaw ją w aplikacji Tuya, a potem w ustawieniach "
-                        "listwy kliknij „Zapamiętaj efekt z aplikacji…”."),
+                        "program nie zrobi na niej płynnej fali – steruje nią jednym kolorem, "
+                        "zsynchronizowanym z urządzeniami Razer. Jeśli wolisz falę wzdłuż listwy "
+                        "kosztem synchronizacji, zapamiętaj jej własny efekt z aplikacji Tuya "
+                        "(ustawienia listwy → „Zapamiętaj efekt z aplikacji…”)."),
 }
 
 

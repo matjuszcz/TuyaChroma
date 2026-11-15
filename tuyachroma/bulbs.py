@@ -52,6 +52,7 @@ OFFLINE_ERRORS = {"901", "905"}
 # 902 = no answer in time, 914 = connection garbled (key/version): the link is broken
 LINK_ERRORS = {"902", "914"}
 RETRY_FIRST = 5.0
+HEARTBEAT_EVERY = 8.0  # keep the persistent socket alive (and notice a light that rebooted)
 REFRESH_EVERY = 10.0  # resend an unchanged color: a bulb that rebooted shows it again
 SLOW_MAX = 1.0        # slowest sending rate (s) for a bulb that can't keep up
 SLOW_RECOVER = 30.0   # after this long without problems, try sending faster again
@@ -286,6 +287,7 @@ class BulbWorker(threading.Thread):
             dev.close()
             raise BulbOffline("not reachable (switched off?)")
         if not status or "dps" not in status:
+            dev.close()
             raise ConnectionError(f"no status from bulb ({status})")
         if not dev.bulb_configured or not dev.dpset.get("colour"):
             dev.close()
@@ -297,6 +299,7 @@ class BulbWorker(threading.Thread):
         if method == "music" and not dev.dpset.get("music"):
             _LOGGER.warning("%s: music mode not supported, using colour mode", self.cfg.name)
         self._sent = None
+        self._scene_sent = None  # a light that rebooted lost its effect: send it again
         # _in_sync_mode survives reconnects: the bulb may still show our color.
         self.connected = True
         self.status = STATUS_SYNC if self._in_sync_mode else STATUS_READY
@@ -327,7 +330,7 @@ class BulbWorker(threading.Thread):
                 self._wake.set()
         while not self._stopping.is_set():
             following = callable(self._target)
-            self._wake.wait(timeout=self._interval() if following else 5)
+            self._wake.wait(timeout=self._interval() if following else min(5.0, HEARTBEAT_EVERY))
             self._wake.clear()
             if self._stopping.is_set():
                 return
@@ -338,14 +341,16 @@ class BulbWorker(threading.Thread):
             if self._capture is not None:
                 done, result = self._capture
                 self._capture = None
-                reply = self._dev.status()
-                if isinstance(reply, dict) and "dps" in reply:
-                    result["dps"] = dict(reply["dps"])
-                done.set()
+                try:
+                    reply = self._dev.status()
+                    if isinstance(reply, dict) and "dps" in reply:
+                        result["dps"] = dict(reply["dps"])
+                finally:
+                    done.set()  # never leave the caller waiting, even on a network error
                 last_contact = now
                 continue
             if self._hold:
-                if now - last_contact > 8:
+                if now - last_contact > HEARTBEAT_EVERY:
                     check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
                     last_contact = now
                 continue
@@ -358,12 +363,12 @@ class BulbWorker(threading.Thread):
                 if self._scene_sent != target:
                     self._send_scene(target)
                     last_send = last_contact = time.monotonic()
-                elif now - last_contact > 8:
+                elif now - last_contact > HEARTBEAT_EVERY:
                     check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
                     last_contact = now
                 continue
             if target is None:
-                if now - last_contact > 8:  # keep the persistent socket alive
+                if now - last_contact > HEARTBEAT_EVERY:  # keep the persistent socket alive
                     check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
                     last_contact = now
                 continue
@@ -401,7 +406,7 @@ class BulbWorker(threading.Thread):
         scene_was_on = self._scene_sent is not None
         self._scene_sent = None
         if self.use_music:
-            if not self._in_sync_mode:
+            if not self._in_sync_mode or scene_was_on:
                 dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"})
             started = time.perf_counter()
             check_reply(dev.set_music_colour(0, r, g, b), "color")
