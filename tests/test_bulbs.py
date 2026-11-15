@@ -183,8 +183,9 @@ def test_switched_off_bulb_is_quiet(monkeypatch, caplog) -> None:
     """A bulb without power: calm status, one log line, ever longer pauses, then back."""
     from tuyachroma import bulbs
 
-    monkeypatch.setattr(bulbs, "RETRY_FIRST", 0.01)
-    monkeypatch.setattr(bulbs, "RETRY_MAX", 0.04)
+    # long enough for Windows' ~15 ms timer: 50, 100, 200 ms (10/40 ms both came out 31 ms)
+    monkeypatch.setattr(bulbs, "RETRY_FIRST", 0.05)
+    monkeypatch.setattr(bulbs, "RETRY_MAX", 0.4)
     bulb = FakeBulb()
     offline = {"Error": "Network Error: Device Unreachable", "Err": "905", "Payload": None}
     calls = []
@@ -200,7 +201,7 @@ def test_switched_off_bulb_is_quiet(monkeypatch, caplog) -> None:
     with caplog.at_level("DEBUG", logger="tuyachroma.bulbs"):
         worker.start()
         try:
-            assert wait_for(lambda: len(calls) >= 5)
+            assert wait_for(lambda: len(calls) >= 5, 4)
             assert worker.status == bulbs.STATUS_OFFLINE
             warnings = [r for r in caplog.records if r.levelname == "WARNING"]
             assert len(warnings) == 1
