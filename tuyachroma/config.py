@@ -60,11 +60,16 @@ class Device:
         return cls(**{k: v for k, v in data.items() if k in names})
 
     def bulb_config(self) -> BulbConfig:
+        from .advisor import product_hint  # noqa: PLC0415
+
+        hint = product_hint(self)
+        # A model known to choke on faster colors (Battletron: < 0.2 s) never gets them.
+        min_interval = max(self.min_interval, hint[0]) if hint is not None else self.min_interval
         return BulbConfig(
             name=self.name, id=self.id, ip=self.ip, local_key=self.local_key,
             version=self.version or "3.3", source=self.source, zone=self.zone,
             mode=self.mode, brightness=self.brightness, min_brightness=self.min_brightness,
-            method=self.method, min_interval=self.min_interval, codes=tuple(self.codes),
+            method=self.method, min_interval=min_interval, codes=tuple(self.codes),
             latency_adjust_ms=int(self.latency_adjust_ms),
             scene=dict(self.scene) if (self.use_scene and self.scene) else None,
         )

@@ -216,6 +216,9 @@ def test_switched_off_bulb_is_quiet(monkeypatch, caplog) -> None:
 
 def test_unconfirmed_color_reconnects_and_resends(monkeypatch) -> None:
     """tinytuya returns errors instead of raising: the lamp froze without notice."""
+    from tuyachroma import bulbs as _b
+
+    monkeypatch.setattr(_b, "CONFIRM_EVERY", 0.0)  # every color confirmed: errors show at once
     worker, bulb = make_worker(music=False)
     try:
         worker.set_color((255, 0, 0))
@@ -263,6 +266,9 @@ def test_unchanged_color_is_refreshed(monkeypatch) -> None:
 
 def test_bulb_that_dropped_off_stays_slower(monkeypatch) -> None:
     """Lampka Biurko vanished from Wi-Fi under a fast effect: remember to go easy on it."""
+    from tuyachroma import bulbs as _b
+
+    monkeypatch.setattr(_b, "CONFIRM_EVERY", 0.0)  # every color confirmed: errors show at once
     from tuyachroma import bulbs
 
     monkeypatch.setattr(bulbs, "_learned_slow", {})

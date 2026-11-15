@@ -220,16 +220,31 @@ def test_precise_bulbs_match_each_other_and_the_keyboard() -> None:
     assert colors[0] == colors[1] == colors[2] == keyboard
 
 
-def test_auto_mode_is_colour_mode_even_with_control_data() -> None:
-    """1.9.15 log: GU10s in music mode never confirmed colors (~3 s timeout each)."""
-    bulb = FakeBulb(music=True)
-    worker = BulbWorker(BulbConfig(name="x", id="x", ip="1", local_key="k",
+def test_auto_mode_gives_gu10s_quick_fades_without_waiting() -> None:
+    """Videos: in colour mode the GU10s fade slowly; music data is quick, but they never
+    answer it - 1.9.15 waited 3 s per color for that. Now: music data, no waiting."""
+    calls = []
+
+    class GU10(FakeBulb):
+        def set_music_colour(self, transition, r, g, b, nowait=False):
+            calls.append((transition, nowait))
+            if not nowait:
+                time.sleep(0.5)  # would wait for an answer that never comes
+
+    bulb = GU10(music=True)
+    worker = BulbWorker(BulbConfig(name="RGB Biuro 1", id="b1", ip="1", local_key="k", min_interval=0.02,
                                    codes=("colour_data_v2", "control_data", "music_data")),
                         device_factory=lambda _c: bulb)
     worker.start()
     try:
         assert wait_for(lambda: worker.connected)
-        assert worker.use_music is False and worker.fade_ms == bulbs.COLOUR_FADE_MS
+        assert worker.use_music and worker.fade_ms == bulbs.MUSIC_FADE_MS
+        for i in range(6):
+            worker.set_color((40 * i, 200, 255 - 40 * i))
+            time.sleep(0.04)
+        assert wait_for(lambda: len(calls) >= 5, 1.0)  # several colors quickly, no 3 s stalls
+        assert all(c == (1, True) for c in calls)        # short gradient, not waiting
+        assert not worker.no_ack and worker.latency_ms is None
     finally:
         worker.stop(2)
 
@@ -277,7 +292,7 @@ def test_offset_includes_the_lights_fade() -> None:
 def test_methods_keep_profiles_smooth() -> None:
     """Razer profiles flow smoothly: every mode but "jump" fades between colors."""
     cases = {  # method, codes -> (music data?, transition, fade)
-        ("auto", ("control_data",)): (False, 1, bulbs.COLOUR_FADE_MS),
+        ("auto", ("control_data",)): (True, 1, bulbs.MUSIC_FADE_MS),
         ("auto", ("music_data",)): (False, 1, bulbs.COLOUR_FADE_MS),  # Battletron: colour mode
         ("colour", ("control_data",)): (False, 1, bulbs.COLOUR_FADE_MS),
         ("music", ()): (True, 1, bulbs.MUSIC_FADE_MS),
@@ -368,3 +383,40 @@ def test_unchanged_value_does_not_block_the_light(monkeypatch) -> None:
         assert wait_for(lambda: bulb.sent[-1][1].get("24") != TuyaLike.shown or worker.latency_ms)
     finally:
         worker.stop(2)
+
+
+def test_colour_mode_does_not_wait_for_every_answer() -> None:
+    """1.9.17 log: GU10s left changing colors unanswered too (2.5-3 s stalls in Spectrum)."""
+    waited = []
+
+    class Slow(FakeBulb):
+        def set_multiple_values(self, values, nowait=False):
+            super().set_multiple_values(values, nowait)
+            if "24" in values and not nowait:
+                waited.append(1)
+                time.sleep(0.3)  # an answer that never comes
+
+    bulb = Slow(music=False)
+    worker = BulbWorker(BulbConfig(name="RGB Biuro 3", id="b3", ip="1", local_key="k", min_interval=0.02,
+                                   method="colour"), device_factory=lambda _c: bulb)
+    worker.start()
+    try:
+        assert wait_for(lambda: worker.connected)
+        start = time.monotonic()
+        for i in range(20):
+            worker.set_color((10 * i, 100, 200 - 5 * i))
+            time.sleep(0.03)
+        assert wait_for(lambda: sum(1 for k, v in bulb.sent if "24" in v) >= 8, 2)  # colors keep flowing
+        assert len(waited) <= 2                 # only the takeover / an occasional check waits
+        assert time.monotonic() - start < 2.0   # the light never stalled
+    finally:
+        worker.stop(2)
+
+
+def test_battletron_never_gets_colors_faster_than_it_takes() -> None:
+    lamp = Device(id="lb", name="Light Bar", local_key="k", ip="1", product_name="Battletron Light Bar")
+    assert lamp.min_interval == 0.15 and lamp.bulb_config().min_interval == 0.3
+    lamp.min_interval = 0.5
+    assert lamp.bulb_config().min_interval == 0.5  # slower settings stay
+    other = Device(id="b1", name="RGB Biuro 1", local_key="k", ip="1", product_name="GU10 W505Z2")
+    assert other.bulb_config().min_interval == 0.15

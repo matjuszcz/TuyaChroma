@@ -56,6 +56,7 @@ RETRY_FIRST = 5.0
 # so the fade ends together with the Razer devices).
 COLOUR_FADE_MS = 250.0  # colour mode: the light's own fade
 MUSIC_FADE_MS = 100.0   # music data with transition "gradient": a short, quick fade
+CONFIRM_EVERY = 3.0  # s: one color in this time waits for the light's answer
 NO_ACK_MS = 2000.0  # a "confirmation" this slow is the timeout, not the light's delay
 HEARTBEAT_EVERY = 8.0  # keep the persistent socket alive (and notice a light that rebooted)
 REFRESH_EVERY = 10.0  # resend an unchanged color: a bulb that rebooted shows it again
@@ -149,12 +150,12 @@ class BulbConfig:
     mode: str = "vivid"
     brightness: float = 1.0
     min_brightness: float = 0.05
-    # auto:   colour mode - the light's own smooth fade, sent ahead so it ends
-    #         with the Razer devices. (Music/control data with a gradient was
-    #         tried: on the user's GU10s every new color restarted a long fade
-    #         and the lights hardly moved - see the 1.9.15 video.)
-    # colour: the same, explicitly       music: music data with fades (opt-in)
-    # jump:   music data, instant changes, no transition (opt-in)
+    # auto:   lights listing "control_data" (e.g. GU10s): music data with a short
+    #         gradient, sent without waiting for an answer (they never answer
+    #         it - waiting was the 3 s stall of 1.9.15) - quick, smooth fades.
+    #         Others: colour mode, the light's own (slower) fade.
+    # colour: colour mode always     music: music data with short fades
+    # jump:   music data, instant changes, no transition
     method: str = "auto"
     codes: tuple[str, ...] = ()  # the light's data points from the Tuya account
     min_interval: float = 0.15
@@ -208,6 +209,7 @@ class BulbWorker(threading.Thread):
         self.latency_ms: float | None = None  # measured: color sent -> bulb confirmed
         self.no_ack = False  # the light never confirms colors (only timeouts)
         self._last_value: tuple | None = None  # what the light shows now (mode, transition, hex)
+        self._last_probe = 0.0  # last color sent with a confirmation
         # pause between colors for a bulb that can't keep up (>= cfg.min_interval)
         self.slow_interval = _learned_slow.get(cfg.id, 0.0)
         self._last_problem = 0.0
@@ -381,7 +383,10 @@ class BulbWorker(threading.Thread):
         self.dps = sorted((str(k) for k in status["dps"]), key=lambda k: (len(k), k))
         method = self.cfg.method
         can_music = bool(dev.dpset.get("music"))
-        self.use_music = can_music and method in ("music", "jump")
+        if method == "auto":
+            self.use_music = can_music and "control_data" in self.cfg.codes
+        else:
+            self.use_music = can_music and method in ("music", "jump")
         # Razer profiles flow smoothly, so the lights fade too (music data with
         # transition 1 = gradient); only "jump" changes instantly (transition 0).
         self.transition = 0 if method == "jump" else 1
@@ -521,14 +526,34 @@ class BulbWorker(threading.Thread):
         if self.use_music:
             if full:
                 dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"})
-            started = time.perf_counter()
-            check_reply(dev.set_music_colour(self.transition, r, g, b), "color")
+            # Lights never answer music data: don't wait for it (that stalled
+            # every color for the 3 s timeout); their delay is not measured.
+            dev.set_music_colour(self.transition, r, g, b, nowait=True)
+            self._last_value = value_key
+            self._in_sync_mode = True
+            self.status = STATUS_SYNC
+            self._sent = rgb
+            self._send_count += 1
+            return
         else:
             values = {dps["colour"]: hexval}
             if full:
                 values[dps["switch"]] = True
                 if dps.get("mode"):
                     values[dps["mode"]] = "colour"
+            now = time.monotonic()
+            if not full and now - self._last_probe < CONFIRM_EVERY:
+                # Lights don't always answer a color (GU10s: 3 s stalls in Spectrum, 1.9.17
+                # log). Waiting for every answer froze the light; only every few seconds
+                # one color is confirmed - to measure the delay and notice a lost light.
+                dev.set_multiple_values(values, nowait=True)
+                self._last_value = value_key
+                self._in_sync_mode = True
+                self.status = STATUS_SYNC
+                self._sent = rgb
+                self._send_count += 1
+                return
+            self._last_probe = now
             started = time.perf_counter()
             check_reply(dev.set_multiple_values(values), "color")
         self._last_value = value_key
