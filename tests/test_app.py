@@ -335,6 +335,7 @@ def test_minimize_and_close_go_to_tray(tmp_path, monkeypatch) -> None:
     service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
     app = gui.App(AppConfig(), service, start_hidden=False, use_tray=False)
     app._tray = FakeTray()
+    app._tray_ready.set()  # the icon is really in the tray
     try:
         app.root.update()
         if sys.platform == "win32":
@@ -659,3 +660,36 @@ def test_quick_clicks_applied_once(tmp_path, monkeypatch) -> None:
         service.stop()
         app._quitting = True
         app.root.destroy()
+
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_tray_menu_builds_with_real_pystray(tmp_path, monkeypatch) -> None:
+    """Regression: profile items had a callable pystray rejects -> invisible tray icon."""
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    pystray = pytest.importorskip("pystray")
+    from tuyachroma import gui
+
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(AppConfig(), service, start_hidden=False, use_tray=False)
+    activated = []
+    monkeypatch.setattr(app, "activate_profile", lambda name=None: activated.append(name))
+    try:
+        menu = app._tray_menu(pystray)
+        top = list(menu.items)
+        assert [str(i.text) for i in top][0] == "Otwórz"
+        submenu = top[2].submenu
+        items = list(submenu.items)  # builds the profile items like the tray thread does
+        assert [i.text for i in items] == [p.name for p in app.config.settings.profiles]
+        assert items[0].checked  # active profile marked
+        items[3](None)  # click a profile in the tray
+        app._pump()
+        assert activated == [app.config.settings.profiles[3].name]
+        assert not app.tray_ok  # no icon -> closing the window must not hide the app
+        app.on_close()
+        assert app._quitting
+    finally:
+        service.stop()
+        if not app._quitting:
+            app._quitting = True
+            app.root.destroy()

@@ -81,6 +81,7 @@ class App:
         self.service = service
         self._queue: queue.Queue[Callable[[], None]] = queue.Queue()
         self._tray = None
+        self._tray_ready = threading.Event()
         self._account = None
         self._login_deadline = 0.0
         self._quitting = False
@@ -106,8 +107,9 @@ class App:
         if use_tray:
             self._start_tray()
         if start_hidden and self._tray is not None:
-            self.root.withdraw()
-            self._tray_hint_shown = True  # autostart: stay quiet
+            # autostart: hide only once the icon is really in the tray
+            self._tray_hint_shown = True
+            self.root.after(300, self._hide_when_tray_ready, 0)
         self.root.after(200, self._pump)
         self.root.after(1000, self._tick)
         self.root.after(20_000, self._auto_update_check)  # shortly after start, then daily
@@ -1099,38 +1101,78 @@ class App:
             import pystray  # noqa: PLC0415
             from PIL import Image, ImageDraw  # noqa: PLC0415
         except ImportError:
+            _LOGGER.exception("Tray icon unavailable")
             return
         img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
         draw.ellipse((6, 6, 58, 58), fill=RAZER_GREEN)
         draw.ellipse((22, 22, 42, 42), fill=(255, 255, 255, 255))
-        self._tray = pystray.Icon("TuyaChroma", img, "TuyaChroma", menu=self._tray_menu())
-        self._tray.run_detached()
+        try:
+            menu = self._tray_menu(pystray)
+            list(self._profile_items(pystray))  # build the profile submenu now: fail loudly here
+            self._tray = pystray.Icon("TuyaChroma", img, "TuyaChroma", menu=menu)
+        except Exception:  # noqa: BLE001 - without a tray the window just stays a window
+            _LOGGER.exception("Tray icon could not be created")
+            self._tray = None
+            return
 
-    def _tray_menu(self):
-        import pystray  # noqa: PLC0415
+        def setup(icon) -> None:
+            # Runs in pystray's thread. Errors here used to make the icon silently
+            # invisible, so log them and only rely on the tray once it is shown.
+            try:
+                icon.visible = True
+                self._tray_ready.set()
+                _LOGGER.info("Tray icon shown")
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Tray icon could not be shown")
+
+        self._tray.run_detached(setup)
+
+    @property
+    def tray_ok(self) -> bool:
+        """Only hide the window when the tray icon is really visible."""
+        return self._tray is not None and self._tray_ready.is_set()
+
+    def _profile_items(self, pystray):
+        def action_for(name: str):
+            # exactly (icon, item): pystray rejects callables with other arities
+            def action(icon, item) -> None:
+                self._queue.put(lambda: self.activate_profile(name))
+            return action
+
+        def checked_for(name: str):
+            def checked(item) -> bool:
+                return self.config.settings.active_profile == name
+            return checked
+
+        for p in self.config.settings.profiles:
+            yield pystray.MenuItem(p.name, action_for(p.name), checked=checked_for(p.name), radio=True)
+
+    def _tray_menu(self, pystray=None):
+        if pystray is None:
+            import pystray  # noqa: PLC0415
+
+        def sync_text(item) -> str:
+            return "Wstrzymaj sterowanie" if self.config.settings.sync_enabled else "Włącz sterowanie"
 
         return pystray.Menu(
             pystray.MenuItem("Otwórz", lambda: self._queue.put(self.show), default=True),
-            pystray.MenuItem(
-                lambda _i: "Wstrzymaj sterowanie" if self.config.settings.sync_enabled else "Włącz sterowanie",
-                lambda: self._queue.put(self.toggle_sync),
-            ),
-            pystray.MenuItem("Profil efektu", pystray.Menu(lambda: [
-                pystray.MenuItem(
-                    p.name,
-                    lambda _i, _it, name=p.name: self._queue.put(lambda: self.activate_profile(name)),
-                    checked=lambda _i, name=p.name: self.config.settings.active_profile == name,
-                    radio=True,
-                )
-                for p in self.config.settings.profiles
-            ])),
+            pystray.MenuItem(sync_text, lambda: self._queue.put(self.toggle_sync)),
+            pystray.MenuItem("Profil efektu", pystray.Menu(lambda: self._profile_items(pystray))),
             pystray.MenuItem("Zakończ", lambda: self._queue.put(self.quit)),
         )
 
     def _update_tray_menu(self) -> None:
         if self._tray is not None:
             self._tray.update_menu()
+
+    def _hide_when_tray_ready(self, waited: int) -> None:
+        if self.tray_ok:
+            self.root.withdraw()
+        elif waited < 10_000:
+            self.root.after(300, self._hide_when_tray_ready, waited + 300)
+        else:
+            _LOGGER.warning("Tray icon did not appear; keeping the window visible")
 
     def show(self) -> None:
         self.root.deiconify()
@@ -1152,11 +1194,11 @@ class App:
 
     def _on_unmap(self, event: tk.Event) -> None:
         # Minimize button (_) -> hide to the tray instead of the taskbar.
-        if event.widget is self.root and self._tray is not None and self.root.state() == "iconic":
+        if event.widget is self.root and self.tray_ok and self.root.state() == "iconic":
             self.root.after(0, self.hide_to_tray)
 
     def on_close(self) -> None:
-        if self._tray is not None:
+        if self.tray_ok:
             self.hide_to_tray()  # keep running in the tray
         else:
             self.quit()

@@ -145,3 +145,28 @@ def test_single_instance_waits_after_update() -> None:
     assert not winsys.acquire_single_instance(wait_seconds=1.0)  # old copy still running
     assert time.monotonic() - started >= 0.9  # it really waited
     winsys._instance_handle = first
+
+
+
+def test_real_tray_icon_appears(tmp_path, monkeypatch) -> None:
+    import time
+
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui
+    from tuyachroma.config import AppConfig
+    from tuyachroma.engine import SyncService
+
+    service = SyncService(reader_factory=lambda s: (_ for _ in ()).throw(razer.RazerUnavailable("x")),
+                          service_check=lambda: False, layout_detector=lambda: "full")
+    app = gui.App(AppConfig(), service, start_hidden=False, use_tray=True)
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline and not app.tray_ok:
+            app.root.update()
+            time.sleep(0.05)
+        assert app.tray_ok and app._tray.visible  # the icon is in the tray
+        app.on_close()  # X hides the window into the tray
+        app.root.update()
+        assert app.root.state() == "withdrawn" and not app._quitting
+    finally:
+        app.quit()
