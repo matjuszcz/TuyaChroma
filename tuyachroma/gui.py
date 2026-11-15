@@ -67,8 +67,8 @@ LAYOUT_LABELS = {
 METHOD_LABELS = {
     "auto": "Automatycznie – płynnie (zalecane)",
     "colour": "Kolor – płynne przejścia",
-    "music": "Music – szybkie płynne przejścia",
-    "jump": "Natychmiast – bez przejść",
+    "music": "Music – szybkie przejścia (może zawiesić żarówkę)",
+    "jump": "Natychmiast – bez przejść (może zawiesić żarówkę)",
 }
 # Device.min_interval (s between colors) -> label
 SPEED_LABELS = {

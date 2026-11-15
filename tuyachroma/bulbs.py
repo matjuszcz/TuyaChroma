@@ -75,6 +75,10 @@ SLOW_RECOVER = 30.0   # after this long without problems, try sending faster aga
 # flooded): they keep the slower rate until the program is restarted.
 _learned_slow: dict[str, float] = {}
 
+# Lights that hung (error 914) while getting music data: colour mode for them
+# until the program restarts.
+_music_hangs: set[str] = set()
+
 
 # Some lights reboot after a fixed time on one connection (Lampka Biurko, a
 # Battletron light bar: always ~183 s after connecting). Once two drops happen
@@ -158,12 +162,12 @@ class BulbConfig:
     mode: str = "vivid"
     brightness: float = 1.0
     min_brightness: float = 0.05
-    # auto:   lights listing "control_data" (e.g. GU10s): music data with a short
-    #         gradient, sent without waiting for an answer (they never answer
-    #         it - waiting was the 3 s stall of 1.9.15) - quick, smooth fades.
-    #         Others: colour mode, the light's own (slower) fade.
-    # colour: colour mode always     music: music data with short fades
-    # jump:   music data, instant changes, no transition
+    # auto:   colour mode - the light's own smooth fade, sent ahead so it ends
+    #         with the Razer devices. Music data was tried for the GU10s (1.9.18-
+    #         1.9.22): quick fades, but RGB Biuro 2 hung after 10-20 min each time
+    #         (error 914 until switched off); never in colour mode.
+    # colour: the same              music: music data, short fades (opt-in)
+    # jump:   music data, instant changes (opt-in)
     method: str = "auto"
     codes: tuple[str, ...] = ()  # the light's data points from the Tuya account
     min_interval: float = 0.15
@@ -337,6 +341,11 @@ class BulbWorker(threading.Thread):
                     self._disconnect()
                     continue
                 except Exception as err:  # noqa: BLE001
+                    if self.use_music and ("914" in str(err) or "device key" in str(err)):
+                        _music_hangs.add(self.cfg.id)
+                        _LOGGER.warning("%s: stopped answering properly in music mode (error 914) "
+                                        "- using colour mode from now on; if it keeps failing, "
+                                        "switch it off and on", self.cfg.name)
                     if isinstance(err, BulbOffline):
                         _record_drop_age(self.cfg.id, self.cfg.name,
                                          time.monotonic() - self._connected_at)
@@ -394,10 +403,9 @@ class BulbWorker(threading.Thread):
         self.dps = sorted((str(k) for k in status["dps"]), key=lambda k: (len(k), k))
         method = self.cfg.method
         can_music = bool(dev.dpset.get("music"))
-        if method == "auto":
-            self.use_music = can_music and "control_data" in self.cfg.codes
-        else:
-            self.use_music = can_music and method in ("music", "jump")
+        self.use_music = can_music and method in ("music", "jump")
+        if self.use_music and self.cfg.id in _music_hangs:
+            self.use_music = False  # it hung in music mode before: colour mode instead
         # Razer profiles flow smoothly, so the lights fade too (music data with
         # transition 1 = gradient); only "jump" changes instantly (transition 0).
         self.transition = 0 if method == "jump" else 1

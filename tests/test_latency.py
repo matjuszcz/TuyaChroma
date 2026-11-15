@@ -220,9 +220,9 @@ def test_precise_bulbs_match_each_other_and_the_keyboard() -> None:
     assert colors[0] == colors[1] == colors[2] == keyboard
 
 
-def test_auto_mode_gives_gu10s_quick_fades_without_waiting() -> None:
-    """Videos: in colour mode the GU10s fade slowly; music data is quick, but they never
-    answer it - 1.9.15 waited 3 s per color for that. Now: music data, no waiting."""
+def test_music_mode_sends_without_waiting() -> None:
+    """Music data is never answered (1.9.15 waited 3 s per color): sent without waiting.
+    Opt-in only since 1.9.23 - it hung a GU10 after 10-20 min (error 914)."""
     calls = []
 
     class GU10(FakeBulb):
@@ -233,7 +233,7 @@ def test_auto_mode_gives_gu10s_quick_fades_without_waiting() -> None:
 
     bulb = GU10(music=True)
     worker = BulbWorker(BulbConfig(name="RGB Biuro 1", id="b1", ip="1", local_key="k", min_interval=0.02,
-                                   codes=("colour_data_v2", "control_data", "music_data")),
+                                   method="music", codes=("colour_data_v2", "control_data", "music_data")),
                         device_factory=lambda _c: bulb)
     worker.start()
     try:
@@ -292,7 +292,7 @@ def test_offset_includes_the_lights_fade() -> None:
 def test_methods_keep_profiles_smooth() -> None:
     """Razer profiles flow smoothly: every mode but "jump" fades between colors."""
     cases = {  # method, codes -> (music data?, transition, fade)
-        ("auto", ("control_data",)): (True, 1, bulbs.MUSIC_FADE_MS),
+        ("auto", ("control_data",)): (False, 1, bulbs.COLOUR_FADE_MS),  # GU10s: colour mode
         ("auto", ("music_data",)): (False, 1, bulbs.COLOUR_FADE_MS),  # Battletron: colour mode
         ("colour", ("control_data",)): (False, 1, bulbs.COLOUR_FADE_MS),
         ("music", ()): (True, 1, bulbs.MUSIC_FADE_MS),
@@ -447,5 +447,32 @@ def test_reply_timeout_is_not_taken_for_delay() -> None:
         worker.set_color((0, 0, 255))
         assert wait_for(lambda: worker.no_ack, 3)
         assert worker.latency_ms == first  # the timeout was not recorded as delay
+    finally:
+        worker.stop(2)
+
+
+def test_light_that_hangs_in_music_mode_goes_back_to_colour(monkeypatch) -> None:
+    """1.9.21 log: RGB Biuro 2 hung with error 914 ~20 min into music mode, twice."""
+    monkeypatch.setattr(bulbs, "_music_hangs", set())
+    made = []
+
+    class Hanging(FakeBulb):
+        def heartbeat(self, nowait=False):
+            if len(made) == 1:
+                return {"Error": "Check device key or version", "Err": "914", "Payload": None}
+
+    def factory(_cfg):
+        made.append(Hanging(music=True))
+        return made[-1]
+
+    monkeypatch.setattr(bulbs, "HEARTBEAT_EVERY", 0.05)
+    worker = BulbWorker(BulbConfig(name="RGB Biuro 2", id="b2", ip="1", local_key="k", min_interval=0.02,
+                                   method="music"), device_factory=factory)
+    worker.start()
+    try:
+        assert wait_for(lambda: worker.connected)
+        worker.set_color((255, 0, 0))
+        assert wait_for(lambda: len(made) >= 2 and worker.connected, 3)
+        assert worker.use_music is False and "b2" in bulbs._music_hangs
     finally:
         worker.stop(2)
