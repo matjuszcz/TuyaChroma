@@ -90,3 +90,34 @@ def test_unknown_effect_type_logged_once(caplog) -> None:
         assert razer.parse("keyboard", raw).active is False
         razer.parse("keyboard", raw)
     assert sum("effect type 99" in r.message for r in caplog.records) == 1
+
+
+def _with_newest(device: str, slot: int, etype: int) -> bytes:
+    obj = razer.DEVICES[device].struct.from_buffer_copy(dump(device))
+    obj.write_index = slot + 1
+    obj.data[slot].effect_type = etype
+    return bytes(obj)
+
+
+@pytest.mark.parametrize("control", [razer.EFFECT_ACTIVE, razer.EFFECT_RESUME, razer.EFFECT_INIT])
+def test_control_message_on_top_keeps_the_last_frame(control: int, caplog) -> None:
+    """Synapse writes "Active"/"Resume" between frames: the game's frame still shows.
+
+    Reading only the newest entry made Cyberpunk 2077's effect "end" for a
+    moment again and again (the lights flickered to the profile and back).
+    """
+    raw = _with_newest("keyboard", 9, control)  # slot 8 holds the game's custom frame
+    with caplog.at_level("INFO", logger="tuyachroma.razer"):
+        frame = razer.parse("keyboard", raw)
+    assert frame.active and frame.effect_type == razer.EFFECT_CUSTOM
+    assert GAME_ORANGE in frame.colors
+    assert not any("not decoded" in r.message for r in caplog.records)  # no noise for these
+
+
+def test_ending_message_means_no_effect() -> None:
+    for ending in (razer.EFFECT_SUSPEND, razer.EFFECT_UNINIT):
+        assert not razer.parse("keyboard", _with_newest("keyboard", 9, ending)).active
+    # "Active" right after a "Suspend": still nothing shown
+    obj = razer.DEVICES["keyboard"].struct.from_buffer_copy(_with_newest("keyboard", 9, razer.EFFECT_ACTIVE))
+    obj.data[8].effect_type = razer.EFFECT_SUSPEND
+    assert not razer.parse("keyboard", bytes(obj)).active

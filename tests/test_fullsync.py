@@ -425,8 +425,17 @@ def test_update_bulbs_without_restart() -> None:
         assert service.update_bulbs(config)
         assert service.workers[0] is not a and service.workers[1].cfg.id == "c"
         assert ("UnInit",) not in dll.calls        # Razer devices never fell back to Synapse
-        config.device("c").source = "mouse"        # needs another Razer device -> full restart
-        assert not service.update_bulbs(config)
+        opened = []
+        service._reader_factory = lambda srcs: opened.append(list(srcs)) or _idle_reader(srcs)
+        lights = list(service.workers)
+        config.device("c").source = "mouse"        # follows another Razer device now
+        assert service.update_bulbs(config)        # no full restart (it used to flicker)
+        assert service.workers[0] is lights[0]     # the other light kept running
+        deadline = time.time() + 2
+        while time.time() < deadline and not opened:
+            time.sleep(0.01)
+        assert opened and opened[0] == ["keyboard", "mouse"]  # only the reader reopened
+        assert ("UnInit",) not in dll.calls        # Razer devices kept the profile
     finally:
         service.stop()
 

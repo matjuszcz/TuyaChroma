@@ -361,6 +361,16 @@ def _effect_main_color(effect: object, etype: int, ticks: int) -> RGB | None:
 
 _UNKNOWN_SEEN: set[tuple[str, int]] = set()
 
+# Chroma SDK control messages that Synapse writes into the frame ring between
+# effects (RazerSdkReader's EffectType). "Init", "Resume" and "Active" carry no
+# colors but don't end the effect: the last real frame still shows. "UnInit",
+# "Default", "Suspend" and "Invalid" mean the app stopped showing anything.
+EFFECT_INIT, EFFECT_UNINIT, EFFECT_DEFAULT = 9, 10, 11
+EFFECT_SUSPEND, EFFECT_RESUME, EFFECT_INVALID, EFFECT_ACTIVE = 13, 14, 15, 16
+CONTINUING = {EFFECT_INIT, EFFECT_RESUME, EFFECT_ACTIVE}
+ENDING = {EFFECT_UNINIT, EFFECT_DEFAULT, EFFECT_SUSPEND, EFFECT_INVALID}
+RING = 10
+
 
 def parse(device: str, raw: bytes) -> Frame | None:
     """Decode a raw shared-memory snapshot. Returns None if nothing was written yet."""
@@ -370,7 +380,17 @@ def parse(device: str, raw: bytes) -> Frame | None:
     obj = spec.struct.from_buffer_copy(raw[: C.sizeof(spec.struct)])
     if obj.write_index == 0:
         return None
-    data = obj.data[min(obj.write_index - 1, 9)]
+    newest = (obj.write_index - 1) % RING
+    data = obj.data[newest]
+    if data.effect_type in CONTINUING:
+        # a control message on top: the frame before it is what the device shows
+        for back in range(1, RING):
+            older = obj.data[(newest - back) % RING]
+            if older.effect_type in ENDING:
+                break
+            if older.effect_type not in CONTINUING:
+                data = older
+                break
     ticks = data.timestamp.ticks
     etype = data.effect_type
     effect = data.effect
@@ -392,7 +412,7 @@ def parse(device: str, raw: bytes) -> Frame | None:
         colors = [main] * spec.count
     else:
         colors = None
-        if (device, etype) not in _UNKNOWN_SEEN:
+        if etype not in CONTINUING | ENDING and (device, etype) not in _UNKNOWN_SEEN:
             _UNKNOWN_SEEN.add((device, etype))
             _LOGGER.info("%s: effect type %d is not decoded (treated as no game effect)", device, etype)
     return Frame(device=device, effect_type=etype, colors=colors, ticks=ticks)

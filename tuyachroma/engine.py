@@ -359,8 +359,14 @@ class SyncService:
             if not self.running:
                 return False
             configs = [d.bulb_config() for d in config.enabled_devices]
-            if self._needed_sources(configs, config.settings.idle) != self._sources:
-                return False  # another Razer device must be read: restart the reader
+            wanted_sources = self._needed_sources(configs, config.settings.idle)
+            if wanted_sources != self._sources:
+                if not wanted_sources or not self._sources:
+                    return False  # nothing was / will be read: a full (re)start
+                # Another Razer device must be read: only the reader reopens, the
+                # lights and the Razer devices keep running (no flicker).
+                self._sources = wanted_sources
+                _LOGGER.info("Reading Razer devices: %s", ", ".join(wanted_sources))
             current = {w.cfg.id: w for w in self.workers}
             keep: dict[str, BulbWorker] = {}
             for bulb_id, worker in current.items():
@@ -545,6 +551,11 @@ class SyncService:
                     started = time.monotonic()
                     reader.wait(int(period * 1000))
                     try:
+                        if self._sources != sources:  # a light now follows another device
+                            reader.close()
+                            reader = None
+                            sources = list(self._sources)
+                            continue
                         frames = {src: reader.read(src) for src in sources}
                         apps = reader.read_apps() if hasattr(reader, "read_apps") else None
                     except OSError as err:
