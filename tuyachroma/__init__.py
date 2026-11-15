@@ -1,3 +1,3 @@
 """TuyaChroma: Razer Chroma game effects on Tuya RGB bulbs."""
 
-__version__ = "1.9.6"
+__version__ = "1.9.7"

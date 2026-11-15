@@ -119,7 +119,8 @@ Konto służy tylko do pobrania listy żarówek i kluczy, a sterowanie odbywa si
 Zakładka **Światła**:
 
 * kliknij w kolumnę **✓** przy żarówkach, którymi ma sterować Razer;
-* zaznacz żarówkę, żeby ustawić **źródło koloru**, **strefę** i **jasność**, a potem kliknij **Zapisz**;
+* zaznacz światło, żeby ustawić **źródło koloru**, **strefę** i **jasność** – wybory zapisują się same (pola wpisywane: IP, wersja i korekta opóźnienia – przyciskiem **Zapisz**);
+* **źródło koloru**: światło ustawione na *Klawiaturę* (cała) jest w profilach efektów jednym punktem fali biegnącej przez wszystkie światła; ustawione na *Mysz*, *Chroma Link* itd. albo na część klawiatury pokazuje w tej samej chwili kolor tego urządzenia Razer (w grach zawsze kolor z gry);
 * **Własna fala listwy** (ustawienia światła → *Zapamiętaj efekt z aplikacji…*): wiele listew ma wbudowane efekty, np. falę płynącą wzdłuż listwy, której program nie może narysować sam (listwy Tuya przyjmują przez sieć tylko jeden kolor naraz albo ustawiają segmenty bardzo powoli). Ustaw efekt w aplikacji Tuya / Smart Life, kliknij przycisk i *OK* – program odczyta go z listwy i będzie go włączał w profilach **Wave, Spectrum i Koło** (w innych profilach i w grach listwa dalej dostaje zsynchronizowane kolory). Listwa animuje taki efekt sama, więc porusza się w swoim tempie, **nie równo z urządzeniami Razer** – to opcja dla tych, którzy wolą falę wzdłuż listwy od synchronizacji; domyślnie jest wyłączona. Włączasz i wyłączasz to polem *Własna fala listwy w Wave/Spectrum/Koło*.
 * **Szybkość zmian**: jak często żarówka dostaje nowy kolor (domyślnie do 7 razy na sekundę). Ustaw *średnio* albo *wolno* dla żarówki, która przy płynnych efektach się zawiesza albo restartuje;
 * **Testuj (mignij)**: żarówka mignie na czerwono, zielono i niebiesko, a potem wróci do poprzedniego stanu;

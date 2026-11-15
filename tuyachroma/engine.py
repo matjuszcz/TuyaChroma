@@ -119,6 +119,17 @@ def is_game_active(frames: dict[str, Frame | None], apps: ChromaApps | None,
     return not full_sync
 
 
+def follows_bulb_strip(cfg, profile: Profile) -> bool:
+    """Is this light one point of the profile running across all lights?
+
+    Lights set to the whole keyboard are (a wave runs from light to light).
+    A light set to another Razer device (mouse, Chroma Link, ...) or to a part
+    of the keyboard shows the color of that device/part at the same moment.
+    """
+    return (cfg.zone == "all" and getattr(cfg, "source", "keyboard") == "keyboard"
+            and profile.effect not in DEVICE_EFFECTS)
+
+
 def dispatch(
     workers: list,
     frames: dict[str, Frame | None],
@@ -166,8 +177,8 @@ def dispatch(
         elif idle in ("full", "effect") and profile_frames is not None:
             if not allow_effect(worker):
                 continue  # bulbs change at most bulb_effect_rate times per second
-            if (worker.cfg.zone == "all" and strip and index < len(strip)
-                    and (profile is None or profile.effect not in DEVICE_EFFECTS)):
+            if (strip and index < len(strip)
+                    and (profile is None or follows_bulb_strip(worker.cfg, profile))):
                 rgb = adjust(strip[index], worker.cfg.brightness, worker.cfg.min_brightness)
             else:
                 rgb = zone_color(worker.cfg, profile_frames.get(worker.cfg.source, []), keyboard_area)
@@ -456,7 +467,7 @@ class SyncService:
         base = time.monotonic() if at is None else at
         t = base + self.latency_offset_ms(worker, settings) / 1000
         renderer = player.renderer
-        if cfg.zone == "all" and profile.effect not in DEVICE_EFFECTS:
+        if follows_bulb_strip(cfg, profile):
             rgb = renderer.frame(f"bulbs@{cfg.id}", max(1, count), 1, t)[min(index, count - 1)]
             return adjust(rgb, cfg.brightness, cfg.min_brightness)
         spec = DEVICES[cfg.source]

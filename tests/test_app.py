@@ -899,3 +899,40 @@ def test_capture_scene_from_the_app(tmp_path, monkeypatch) -> None:
     finally:
         service.workers = []
         app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_editor_choice_survives_the_status_refresh(tmp_path, monkeypatch) -> None:
+    """User report: a new color source jumped back to "Klawiatura" by itself.
+
+    The status refresh (every second) re-selected the row, which reloaded the
+    editor from the saved settings before the change was saved.
+    """
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui
+
+    config = AppConfig(devices=[dev("lb", enabled=True, name="Lampka Biurko"), dev("ls", name="Led Strip")])
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    monkeypatch.setattr(app, "save_and_apply", lambda bulbs_only=False: None)
+    try:
+        app.tree.selection_set("lb")
+        app.root.update()
+        app.ed_source.set(gui.SOURCE_LABELS["mouse"])  # picked, not saved yet
+        for _ in range(3):
+            app.refresh_devices()  # what the 1 s status tick does
+            app.root.update()
+        assert app.ed_source.get() == gui.SOURCE_LABELS["mouse"]
+        time.sleep(0.6)  # saved by itself shortly after the change
+        app.root.update()
+        assert config.devices[0].source == "mouse"
+        app.tree.selection_set("ls")  # another light: its own settings
+        app.root.update()
+        assert app.ed_source.get() == gui.SOURCE_LABELS["keyboard"]
+        app.ed_source.set(gui.SOURCE_LABELS["chromalink"])
+        app.tree.selection_set("lb")  # switching right away still saves the change
+        app.root.update()
+        assert config.devices[1].source == "chromalink" and config.devices[0].source == "mouse"
+        assert app.ed_source.get() == gui.SOURCE_LABELS["mouse"]
+    finally:
+        app.root.destroy()

@@ -187,7 +187,7 @@ def test_full_sync_service(monkeypatch) -> None:
         assert "game.exe" in service.razer_status and service.player.paused
 
         state["current"] = OWN  # game closed
-        deadline = time.time() + 2
+        deadline = time.time() + 2 + engine.GAME_HOLD
         while time.time() < deadline and service.game_active:
             time.sleep(0.01)
         assert not service.player.paused

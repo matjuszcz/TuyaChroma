@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import asdict
 import logging
 import os
 import queue
@@ -249,7 +250,7 @@ class App:
             self.tree.column(col, width=self.px(width), anchor="center" if col in ("on", "version") else "w")
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Button-1>", self._on_tree_click)
-        self.tree.bind("<<TreeviewSelect>>", lambda _e: self._load_editor())
+        self.tree.bind("<<TreeviewSelect>>", lambda _e: self._on_tree_select())
 
         self.editor = ttk.LabelFrame(tab, text="Ustawienia światła", padding=10)
         self.editor.pack(fill="x", pady=(8, 0))
@@ -291,6 +292,14 @@ class App:
                      values=list(SPEED_LABELS.values())).grid(row=4, column=2, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(self.editor, text="(wolniej, jeśli żarówka się zawiesza)",
                   foreground="#666").grid(row=4, column=4, sticky="w", padx=(8, 0), pady=(8, 0))
+        # Choices are saved as soon as they change (typed fields: IP, version and
+        # correction with "Zapisz", so a half-typed value isn't applied).
+        self._editor_dev_id: str | None = None
+        self._editor_loading = False
+        self._autosave_pending = None
+        for var in (self.ed_enabled, self.ed_source, self.ed_zone, self.ed_brightness,
+                    self.ed_method, self.ed_speed, self.ed_use_scene):
+            var.trace_add("write", lambda *_a: self._editor_changed())
         btns = ttk.Frame(self.editor)
         btns.grid(row=5, column=0, columnspan=5, sticky="w", pady=(10, 0))
         ttk.Button(btns, text="Zapisz", command=self.save_editor).pack(side="left")
@@ -726,7 +735,10 @@ class App:
                 self.tree.insert("", "end", iid=dev.id, values=values)
         for iid in existing - {d.id for d in self.config.devices}:
             self.tree.delete(iid)
-        if selected and self.tree.exists(selected[0]):
+        # Updating rows keeps the selection. Selecting again would fire
+        # <<TreeviewSelect>> and reload the editor every second, undoing what
+        # the user just picked (e.g. a new color source) before it was saved.
+        if selected and self.tree.exists(selected[0]) and self.tree.selection() != selected:
             self.tree.selection_set(selected)
 
     def _selected_device(self) -> Device | None:
@@ -745,10 +757,38 @@ class App:
         self._load_editor()
         self.save_and_apply(bulbs_only=True)
 
+    def _on_tree_select(self) -> None:
+        dev = self._selected_device()
+        if dev is not None and dev.id != self._editor_dev_id:
+            self._load_editor()  # only when another light is chosen
+
+    def _editor_changed(self) -> None:
+        if self._editor_loading or self._editor_dev_id is None:
+            return
+        if self._autosave_pending is not None:
+            self.root.after_cancel(self._autosave_pending)
+        self._autosave_pending = self.root.after(500, self._autosave)
+
+    def _autosave(self) -> None:
+        self._autosave_pending = None
+        if self._editor_dev_id is not None:
+            self.save_editor(quiet=True)
+
     def _load_editor(self) -> None:
+        if self._autosave_pending is not None:  # finish the previous light's change first
+            self.root.after_cancel(self._autosave_pending)
+            self._autosave()
         dev = self._selected_device()
         if dev is None:
             return
+        self._editor_loading = True
+        try:
+            self._fill_editor(dev)
+        finally:
+            self._editor_loading = False
+        self._editor_dev_id = dev.id
+
+    def _fill_editor(self, dev: Device) -> None:
         self.editor.configure(text=f"Ustawienia światła: {dev.name}")
         self.ed_enabled.set(dev.enabled)
         self.ed_source.set(SOURCE_LABELS.get(dev.source, dev.source))
@@ -763,11 +803,14 @@ class App:
         speed = min(SPEED_LABELS, key=lambda v: abs(v - dev.min_interval))
         self.ed_speed.set(SPEED_LABELS[speed])
 
-    def save_editor(self) -> None:
-        dev = self._selected_device()
+    def save_editor(self, quiet: bool = False) -> None:
+        dev = (self.config.device(self._editor_dev_id) if self._editor_dev_id else None) \
+            or self._selected_device()
         if dev is None:
-            messagebox.showinfo("TuyaChroma", "Najpierw wybierz żarówkę z listy.")
+            if not quiet:
+                messagebox.showinfo("TuyaChroma", "Najpierw wybierz światło z listy.")
             return
+        before = asdict(dev)
         dev.enabled = self.ed_enabled.get()
         dev.source = _label_to_key(SOURCE_LABELS, self.ed_source.get())
         dev.zone = _label_to_key(ZONE_LABELS, self.ed_zone.get())
@@ -784,6 +827,9 @@ class App:
         dev.min_interval = next((k for k, v in SPEED_LABELS.items() if v == self.ed_speed.get()), 0.15)
         if dev.method not in METHOD_LABELS:
             dev.method = "colour"
+        if quiet and asdict(dev) == before:
+            return  # nothing changed
+        _LOGGER.info("%s: settings saved (source %s, zone %s)", dev.name, dev.source, dev.zone)
         self.refresh_devices()
         self.save_and_apply(bulbs_only=True)
 
