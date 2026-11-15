@@ -65,6 +65,7 @@ def test_translated_generic_names_never_win() -> None:
         (r"HID\VID_1532&PID_0099&MI_00\7&3", "Mysz zgodna z HID"),
         (r"HID\VID_1532&PID_0099&MI_01\7&4", "Klawiatura HID"),
         (r"USB\VID_1532&PID_0F1D\6&2", "Złożone urządzenie USB"),
+        (r"HID\VID_1532&PID_0257&MI_03\7&9", "Razer Control Device"),  # also seen (1.6.3 log)
         (r"HID\VID_1532&PID_0F1F&MI_00\7&5", "Urządzenie wejściowe USB"),
     ]
     devices = group_devices(entries)
@@ -75,3 +76,19 @@ def test_translated_generic_names_never_win() -> None:
     assert by_pid["0F1F"].category == "chromalink"
     assert all("zgodne z HID" not in d.name for d in devices)
     assert keyboard_layout(devices) == "mini"
+
+
+def test_generic_razer_name_uses_database() -> None:
+    """1.6.3 log: Windows named the Huntsman Mini only "Razer Control Device"."""
+    from tuyachroma.razer_devices import keyboard_layout
+
+    entries = [
+        (r"HID\VID_1532&PID_0099&MI_00\7&3", "Mysz zgodna z HID"),
+        (r"USB\VID_1532&PID_0F1D\6&2", "Złożone urządzenie USB"),
+        (r"HID\VID_1532&PID_0257&MI_01\7&1", "Razer Control Device"),
+        (r"HID\VID_1532&PID_0F1F&MI_00\7&5", "Razer Control Device"),
+    ]
+    by_pid = {d.pid: d for d in group_devices(entries)}
+    assert by_pid["0257"].name == "Razer Huntsman Mini" and by_pid["0257"].category == "keyboard"
+    assert by_pid["0F1F"].category == "chromalink"
+    assert keyboard_layout(list(by_pid.values())) == "mini"

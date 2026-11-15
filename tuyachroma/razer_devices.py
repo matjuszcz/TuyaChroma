@@ -120,7 +120,9 @@ def group_devices(entries: list[tuple[str, str]]) -> list[RazerDevice]:
     devices = []
     for dev in by_key.values():
         info = _pid_info(dev.pid)
-        if not dev.name and info is not None:  # no Razer name from Windows: use the database
+        # No Razer product name from Windows, or only a generic one such as
+        # "Razer Control Device": the database knows the product by its PID.
+        if info is not None and (not dev.name or categorize(dev.name) == "other"):
             dev.name = info.get("name") or ""
             dev.category = info["category"]
         if not dev.name:

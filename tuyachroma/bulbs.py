@@ -30,7 +30,12 @@ STATUS_OFFLINE = "wyłączona / poza siecią"
 # tinytuya error codes meaning "nothing answers at this IP" (bulb without power,
 # out of Wi-Fi range, or a new IP address)
 OFFLINE_ERRORS = {"901", "905"}
+# 902 = no answer in time, 914 = connection garbled (key/version): the link is broken
+LINK_ERRORS = {"902", "914"}
 RETRY_FIRST = 5.0
+REFRESH_EVERY = 10.0  # resend an unchanged color: a bulb that rebooted shows it again
+SLOW_MAX = 1.0        # slowest sending rate (s) for a bulb that can't keep up
+SLOW_RECOVER = 30.0   # after this long without problems, try sending faster again
 RETRY_MAX = 15.0  # seconds between connection attempts to an unreachable bulb
 
 
@@ -40,6 +45,19 @@ class UnsupportedBulb(Exception):
 
 class BulbOffline(ConnectionError):
     """Nothing answers: the bulb is switched off (or has another IP)."""
+
+
+def check_reply(result: Any, what: str) -> None:
+    """tinytuya reports failures as a returned dict, not as an exception."""
+    if not isinstance(result, dict) or "Err" not in result:
+        return
+    code = str(result.get("Err"))
+    message = f"bulb did not confirm {what}: {result.get('Error') or code}"
+    if code in OFFLINE_ERRORS:
+        raise BulbOffline(message)
+    if code in LINK_ERRORS:
+        raise ConnectionError(message)
+    _LOGGER.debug("%s (ignored)", message)  # e.g. an odd but harmless reply
 
 
 @dataclass
@@ -101,6 +119,9 @@ class BulbWorker(threading.Thread):
         self.connected = False
         self.status = STATUS_CONNECTING
         self.latency_ms: float | None = None  # measured: color sent -> bulb confirmed
+        self.slow_interval = 0.0  # extra pause between colors for a bulb that can't keep up
+        self._last_problem = 0.0
+        self._send_count = 0
 
     # ------------------------------------------------------------ public API
 
@@ -141,7 +162,18 @@ class BulbWorker(threading.Thread):
                 if failures:
                     _LOGGER.info("%s: reachable again", self.cfg.name)
                 failures = 0
-                self._loop()
+                sends_before = self._send_count
+                try:
+                    self._loop()
+                except Exception as err:  # noqa: BLE001
+                    if self._send_count == sends_before:
+                        raise  # nothing got through since connecting: normal retry with pauses
+                    # It worked a moment ago: reconnect right away, not after a pause.
+                    self._slow_down()
+                    _LOGGER.warning("%s: %s - reconnecting", self.cfg.name, err)
+                    self._disconnect()
+                    self._stopping.wait(0.5)
+                    continue
             except UnsupportedBulb as err:
                 _LOGGER.warning("%s: %s", self.cfg.name, err)
                 self.status = STATUS_UNSUPPORTED
@@ -226,15 +258,19 @@ class BulbWorker(threading.Thread):
                 continue
             if target is None:
                 if now - last_contact > 8:  # keep the persistent socket alive
-                    self._dev.heartbeat(nowait=False)
+                    check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
                     last_contact = now
                 continue
-            wait = self.cfg.min_interval - (now - last_send)
+            if self.slow_interval and now - self._last_problem > SLOW_RECOVER:
+                self.slow_interval = self.slow_interval / 2 if self.slow_interval > 0.1 else 0.0
+                self._last_problem = now
+            wait = max(self.cfg.min_interval, self.slow_interval) - (now - last_send)
             if wait > 0:
                 self._stopping.wait(wait)
                 self._wake.set()  # re-check the newest target after the pause
                 continue
-            if self._sent is not None and distance(self._sent, target) < 3:
+            if (self._sent is not None and distance(self._sent, target) < 3
+                    and now - last_send < REFRESH_EVERY):
                 continue
             self._send(target)
             last_send = last_contact = time.monotonic()
@@ -262,7 +298,7 @@ class BulbWorker(threading.Thread):
             if not self._in_sync_mode:
                 dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"})
             started = time.perf_counter()
-            dev.set_music_colour(0, r, g, b)
+            check_reply(dev.set_music_colour(0, r, g, b), "color")
         else:
             values = {dps["colour"]: tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])}
             if not self._in_sync_mode:
@@ -270,11 +306,18 @@ class BulbWorker(threading.Thread):
                 if dps.get("mode"):
                     values[dps["mode"]] = "colour"
             started = time.perf_counter()
-            dev.set_multiple_values(values)
+            check_reply(dev.set_multiple_values(values), "color")
         self._record_latency((time.perf_counter() - started) * 1000)
         self._in_sync_mode = True
         self.status = STATUS_SYNC
         self._sent = rgb
+        self._send_count += 1
+
+    def _slow_down(self) -> None:
+        """The bulb stopped confirming colors: send them less often for a while."""
+        self.slow_interval = min(max(self.slow_interval * 2, self.cfg.min_interval * 2, 0.3), SLOW_MAX)
+        self._last_problem = time.monotonic()
+        _LOGGER.info("%s: sending at most every %.2f s", self.cfg.name, self.slow_interval)
 
     def _record_latency(self, ms: float) -> None:
         """Smoothed send->confirm time; ignores single outliers (e.g. Wi-Fi hiccups)."""

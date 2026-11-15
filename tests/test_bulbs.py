@@ -206,3 +206,50 @@ def test_switched_off_bulb_is_quiet(monkeypatch, caplog) -> None:
             assert any("reachable again" in r.message for r in caplog.records)
         finally:
             worker.stop(2)
+
+
+def test_unconfirmed_color_reconnects_and_resends(monkeypatch) -> None:
+    """tinytuya returns errors instead of raising: the lamp froze without notice."""
+    worker, bulb = make_worker(music=False)
+    try:
+        worker.set_color((255, 0, 0))
+        assert wait_for(lambda: len(bulb.sent) >= 1)
+        fail = {"left": 1}
+        real = bulb.set_multiple_values
+
+        def flaky(values, nowait=False):
+            real(values, nowait)
+            if fail["left"]:
+                fail["left"] -= 1
+                return {"Error": "Check device key or version", "Err": "914", "Payload": None}
+            return None
+
+        bulb.set_multiple_values = flaky
+        worker.set_color((0, 0, 255))
+        # reconnected (quickly) and sent the color again, now more slowly
+        assert wait_for(lambda: fail["left"] == 0 and worker.connected
+                        and worker.status == STATUS_SYNC and worker.slow_interval >= 0.3, 3)
+        n = len(bulb.sent)
+        worker.set_color((0, 255, 0))
+        assert wait_for(lambda: len(bulb.sent) > n)
+        assert worker.status == STATUS_SYNC
+    finally:
+        worker.stop(2)
+
+
+def test_unchanged_color_is_refreshed(monkeypatch) -> None:
+    """A bulb that rebooted by itself gets the current color again."""
+    from tuyachroma import bulbs
+
+    monkeypatch.setattr(bulbs, "REFRESH_EVERY", 0.3)
+    worker, bulb = make_worker(music=False)
+    try:
+        worker.set_color((255, 0, 0))
+        assert wait_for(lambda: len(bulb.sent) >= 1)
+        n = len(bulb.sent)
+        for _ in range(10):
+            worker.set_color((255, 0, 0))  # the engine keeps sending the same color
+            time.sleep(0.1)
+        assert len(bulb.sent) >= n + 2
+    finally:
+        worker.stop(2)
