@@ -113,6 +113,10 @@ class App:
         self.root.after(200, self._pump)
         self.root.after(1000, self._tick)
         self.root.after(20_000, self._auto_update_check)  # shortly after start, then daily
+        self._fail_since: dict[str, float] = {}
+        self._last_rescan = -1e9
+        self._rescanning = False
+        self.root.after(30_000, self._watch_unreachable)
 
     # ----------------------------------------------------------- utilities
 
@@ -871,6 +875,57 @@ class App:
                                 f"{layout} (odświeżono {stamp}).")
         else:
             self.razer_info.set(f"Nie wykryto urządzeń Razer (odświeżono {stamp}).")
+
+    # -------------------------------------------- bulbs that changed their IP
+
+    RESCAN_AFTER = 60.0     # a bulb unreachable this long ...
+    RESCAN_EVERY = 300.0    # ... triggers a network search, at most this often
+
+    def _watch_unreachable(self) -> None:
+        if self._quitting:
+            return
+        try:
+            self._check_unreachable(time.monotonic())
+        finally:
+            self.root.after(30_000, self._watch_unreachable)
+
+    def _check_unreachable(self, now: float) -> None:
+        """Routers often give bulbs a new IP (e.g. after a restart): find them again."""
+        statuses = self.service.bulb_statuses()
+        failing = {d.id for d in self.config.enabled_devices
+                   if statuses.get(d.id, "").startswith("błąd")}
+        for dev_id in failing:
+            self._fail_since.setdefault(dev_id, now)
+        for dev_id in list(self._fail_since):
+            if dev_id not in failing:
+                del self._fail_since[dev_id]
+        long_failing = [i for i, t in self._fail_since.items() if now - t >= self.RESCAN_AFTER]
+        if not long_failing or self._rescanning or now - self._last_rescan < self.RESCAN_EVERY:
+            return
+        self._rescanning = True
+        self._last_rescan = now
+        _LOGGER.info("Unreachable bulb(s) %s: searching the network for new IPs", long_failing)
+
+        def done(found: dict) -> None:
+            self._rescanning = False
+            changed = []
+            for dev in self.config.devices:
+                info = found.get(dev.id)
+                if info and info.get("ip") and info["ip"] != dev.ip:
+                    changed.append(f"{dev.name}: {dev.ip or '?'} → {info['ip']}")
+                    dev.ip = info["ip"]
+                    if info.get("version"):
+                        dev.version = info["version"]
+            if changed:
+                _LOGGER.info("New bulb IPs: %s", "; ".join(changed))
+                self.set_busy("Znaleziono żarówki pod nowym adresem IP: " + "; ".join(changed))
+                self.refresh_devices()
+                self.save_and_apply(bulbs_only=True)
+
+        def failed(_err: Exception) -> None:
+            self._rescanning = False
+
+        self.run_bg(lambda: scan(10), done, failed)
 
     # -------------------------------------------------------------- updates
 

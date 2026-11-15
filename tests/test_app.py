@@ -743,3 +743,44 @@ def test_buttons_visible_in_every_tab(tmp_path, monkeypatch) -> None:
         service.stop()
         app._quitting = True
         app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_unreachable_bulbs_found_under_new_ip(tmp_path, monkeypatch) -> None:
+    """After a PC/router restart the bulbs often get new IPs: search and update them."""
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui
+
+    config = AppConfig(devices=[dev("a", enabled=True, ip="10.0.0.5"),
+                                dev("b", enabled=True, ip="10.0.0.6")])
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    statuses = {"a": "błąd: Device Unreachable", "b": "sterowana przez Razer"}
+    monkeypatch.setattr(service, "bulb_statuses", lambda: dict(statuses))
+    scans = []
+
+    def fake_scan(seconds):
+        scans.append(seconds)
+        return {"a": {"id": "a", "ip": "10.0.0.50", "version": "3.5"},
+                "b": {"id": "b", "ip": "10.0.0.6", "version": "3.3"}}
+
+    monkeypatch.setattr(gui, "scan", fake_scan)
+    monkeypatch.setattr(app, "run_bg", lambda func, done=None, error=None: done(func()))
+    applied = []
+    monkeypatch.setattr(app, "save_and_apply", lambda bulbs_only=False: applied.append(bulbs_only))
+    try:
+        app._check_unreachable(1000.0)        # just failed: wait
+        app._check_unreachable(1030.0)
+        assert scans == []
+        app._check_unreachable(1061.0)        # failing for a minute: search
+        assert scans == [10]
+        assert config.device("a").ip == "10.0.0.50" and config.device("a").version == "3.5"
+        assert config.device("b").ip == "10.0.0.6"
+        assert applied == [True]
+        app._check_unreachable(1100.0)        # still failing, but not more than every 5 min
+        assert scans == [10]
+        statuses["a"] = "sterowana przez Razer"
+        app._check_unreachable(1500.0)
+        assert scans == [10] and app._fail_since == {}
+    finally:
+        app.root.destroy()

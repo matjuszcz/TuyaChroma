@@ -176,3 +176,74 @@ def test_update_refuses_read_only_folder(tmp_path, monkeypatch) -> None:
         updater.apply_update(updater.Release("9", "v9", "", "", "", 0, "x"),
                              get=lambda *a, **k: downloads.append(a))
     assert downloads == []  # refused before downloading anything
+
+
+def test_install_retries_when_defender_blocks(tmp_path, monkeypatch) -> None:
+    current = tmp_path / "TuyaChroma.exe"
+    current.write_bytes(b"old")
+    new = tmp_path / "new.exe"
+    new.write_bytes(b"new")
+    real_replace = updater.os.replace
+    calls = []
+
+    def flaky(src, dst):
+        calls.append(src)
+        if len(calls) == 1:
+            err = OSError("Operation did not complete successfully because the file contains a virus")
+            err.winerror = 225
+            raise err
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(updater.os, "replace", flaky)
+    monkeypatch.setattr(updater.time, "sleep", lambda s: None)
+    updater.install(new, current)
+    assert current.read_bytes() == b"new" and len(calls) == 2
+
+
+def test_install_gives_up_with_clear_message(tmp_path, monkeypatch) -> None:
+    current = tmp_path / "TuyaChroma.exe"
+    current.write_bytes(b"old")
+    new = tmp_path / "new.exe"
+    new.write_bytes(b"new")
+
+    def blocked(src, dst):
+        err = OSError("virus")
+        err.winerror = 225
+        raise err
+
+    monkeypatch.setattr(updater.os, "replace", blocked)
+    monkeypatch.setattr(updater.time, "sleep", lambda s: None)
+    with pytest.raises(updater.UpdateError, match="Defender"):
+        updater.install(new, current)
+    assert current.read_bytes() == b"old"
+
+
+def test_new_instance_gets_its_own_libraries(monkeypatch) -> None:
+    """The restarted exe must not reuse the old instance's _MEI folder (deleted on exit)."""
+    monkeypatch.setenv("_PYI_APPLICATION_HOME_DIR", r"C:\Temp\_MEI123")
+    monkeypatch.setenv("_PYI_PARENT_PROCESS_LEVEL", "1")
+    monkeypatch.setenv("_MEIPASS2", r"C:\Temp\_MEI123")
+    env = updater.independent_env()
+    assert not any(k.startswith("_PYI_") or k.startswith("_MEIPASS") for k in env)
+    assert env["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+    assert env.get("PATH") == updater.os.environ.get("PATH")
+
+
+def test_running_from_temp(monkeypatch, tmp_path) -> None:
+    from tuyachroma import main
+
+    monkeypatch.setattr(main.tempfile, "gettempdir", lambda: str(tmp_path))
+    assert main.running_from_temp(tmp_path / "Rar$EXa1.234" / "TuyaChroma.exe")
+    assert main.running_from_temp(Path(r"C:\Users\x\AppData\Local\Temp\7zO1\TuyaChroma.exe"))
+    assert not main.running_from_temp(Path(r"C:\Users\x\AppData\Local\TuyaChroma\TuyaChroma.exe"))
+
+
+def test_updated_by_old_version_restarts_independently(monkeypatch, tmp_path) -> None:
+    from tuyachroma import main
+
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    started = []
+    monkeypatch.setattr(main.updater, "can_self_update", lambda: True)
+    monkeypatch.setattr(main.updater, "start_detached", lambda exe, *a: started.append(a))
+    assert main.main(["--updated", "--minimized"]) == 0
+    assert started == [("--updated", "--relaunched", "--minimized")]

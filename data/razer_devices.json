@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "updated": "2026-11-14",
+  "version": 2,
+  "updated": "2026-11-15",
   "description": "Razer device database for TuyaChroma: how connected devices are recognised. Rules are matched against the device name (lower case); the first matching rule wins.",
   "rules": [
     {
@@ -154,6 +154,14 @@
     "0099": {
       "name": "Razer Basilisk V3",
       "category": "mouse"
+    },
+    "0F1D": {
+      "name": "Razer Mouse Bungee V3 Chroma",
+      "category": "mousepad"
+    },
+    "0F1F": {
+      "name": "Razer Chroma Addressable RGB Controller",
+      "category": "chromalink"
     }
   }
 }

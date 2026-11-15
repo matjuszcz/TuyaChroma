@@ -51,3 +51,27 @@ def test_categorize() -> None:
     }
     for name, expected in cases.items():
         assert categorize(name) == expected, name
+
+
+def test_translated_generic_names_never_win() -> None:
+    """From a real (Polish Windows) log: long generic HID names replaced the products."""
+    from tuyachroma.razer_devices import keyboard_layout
+
+    generic = "Razer Urządzenie sterujące użytkownika zgodne z HID"
+    entries = [
+        (r"USB\VID_1532&PID_0257\6&1", "Razer Huntsman Mini"),
+        (r"HID\VID_1532&PID_0257&MI_01\7&1", "Urządzenie sterujące użytkownika zgodne z HID"),
+        (r"HID\VID_1532&PID_0257&MI_02\7&2", generic),
+        (r"HID\VID_1532&PID_0099&MI_00\7&3", "Mysz zgodna z HID"),
+        (r"HID\VID_1532&PID_0099&MI_01\7&4", "Klawiatura HID"),
+        (r"USB\VID_1532&PID_0F1D\6&2", "Złożone urządzenie USB"),
+        (r"HID\VID_1532&PID_0F1F&MI_00\7&5", "Urządzenie wejściowe USB"),
+    ]
+    devices = group_devices(entries)
+    by_pid = {d.pid: d for d in devices}
+    assert by_pid["0257"].name == "Razer Huntsman Mini" and by_pid["0257"].category == "keyboard"
+    assert by_pid["0099"].name == "Razer Basilisk V3" and by_pid["0099"].category == "mouse"
+    assert "Bungee" in by_pid["0F1D"].name
+    assert by_pid["0F1F"].category == "chromalink"
+    assert all("zgodne z HID" not in d.name for d in devices)
+    assert keyboard_layout(devices) == "mini"

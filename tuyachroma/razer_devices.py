@@ -86,36 +86,41 @@ _GENERIC = re.compile(r"^(usb|hid)[ -]|input device|composite device|keyboard de
 
 
 def group_devices(entries: list[tuple[str, str]]) -> list[RazerDevice]:
-    """[(instance_id, name)] from the device list -> one RazerDevice per product."""
+    """[(instance_id, name)] from the device list -> one RazerDevice per product.
+
+    Only names that contain "Razer" are trusted: the product string reported
+    by the device always does, while Windows' generic names are translated
+    ("HID-compliant consumer control device", "Urządzenie sterujące
+    użytkownika zgodne z HID", ...) and must never replace it. Devices
+    without a Razer name get it from the device database (by USB PID).
+    """
     by_key: dict[str, RazerDevice] = {}
     for instance_id, name in entries:
         name = (name or "").strip()
         up = instance_id.upper()
         is_razer_usb = RAZER_VID in up
-        if not is_razer_usb and "razer" not in name.lower():
+        has_razer_name = "razer" in name.lower()
+        if not is_razer_usb and not has_razer_name:
             continue
-        if not name or _GENERIC.search(name):
-            if not is_razer_usb:
-                continue
-            name = ""
+        if not has_razer_name:
+            name = ""  # generic (possibly translated) Windows name
         m = re.search(r"PID_([0-9A-F]{4})", up)
         pid = m.group(1) if m else ""
         key = pid or name.lower()
         if not key:
             continue
         dev = by_key.get(key)
-        pretty = name if name.lower().startswith("razer") or not name else f"Razer {name}"
         if dev is None:
-            by_key[key] = RazerDevice(name=pretty, category=categorize(pretty) if pretty else "other",
-                                      connection=_connection(instance_id, pretty), pid=pid)
-        elif pretty and (not dev.name or len(pretty) > len(dev.name)):
-            dev.name = pretty
-            dev.category = categorize(pretty)
-            dev.connection = _connection(instance_id, pretty)
+            by_key[key] = RazerDevice(name=name, category=categorize(name) if name else "other",
+                                      connection=_connection(instance_id, name), pid=pid)
+        elif name and not dev.name:
+            dev.name = name
+            dev.category = categorize(name)
+            dev.connection = _connection(instance_id, name)
     devices = []
     for dev in by_key.values():
         info = _pid_info(dev.pid)
-        if not dev.name and info is not None:  # Windows gave no name: use the database
+        if not dev.name and info is not None:  # no Razer name from Windows: use the database
             dev.name = info.get("name") or ""
             dev.category = info["category"]
         if not dev.name:

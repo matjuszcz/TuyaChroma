@@ -89,6 +89,16 @@ jobs:
           if (Select-String -Path "$env:APPDATA\TuyaChroma\log.txt" -Pattern "Traceback") { exit 1 }
           if (-not (Select-String -Path "$env:APPDATA\TuyaChroma\log.txt" -Pattern "Razer device database version")) { exit 1 }
 
+      - name: Restart test (a copy started by the program has its own libraries)
+        shell: pwsh
+        run: |
+          $env:APPDATA = "$env:RUNNER_TEMP\appdata-spawn"
+          $p = Start-Process dist\TuyaChroma.exe -ArgumentList "--selftest-spawn" -PassThru -Wait
+          Start-Sleep -Seconds 12
+          $log = "$env:APPDATA\TuyaChroma\log.txt"
+          Get-Content $log
+          if (-not (Select-String -Path $log -Pattern "SELFTEST-CHILD OK" -SimpleMatch -Quiet)) { Write-Error "restarted copy is broken"; exit 1 }
+
       - name: Self-update test (swap the running exe, like an update does)
         shell: pwsh
         run: |

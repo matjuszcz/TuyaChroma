@@ -93,6 +93,7 @@ Jeśli starsze urządzenie albo starsza wersja Synapse nie obsługuje rozszerzon
 
 1. Pobierz `TuyaChroma-windows.zip` z **[najnowszego wydania](../../releases/latest)**.
 2. Rozpakuj go do stałego folderu **w swoim profilu użytkownika**, np. `%LOCALAPPDATA%\TuyaChroma` (wpisz to w pasek adresu Eksploratora) albo `C:\TuyaChroma`. **Nie** używaj `C:\Program Files`: zapis tam wymaga uprawnień administratora, więc automatyczna aktualizacja nie mogłaby podmienić programu.
+   Jeśli uruchomisz program prosto z archiwum (WinRAR/7-Zip rozpakowują go wtedy do folderu tymczasowego), sam zaproponuje instalację w `%LOCALAPPDATA%\TuyaChroma`. Wystarczy kliknąć *Tak*.
 3. Uruchom `TuyaChroma.exe`. Program nie ma podpisu cyfrowego, więc Windows SmartScreen może go zablokować. Kliknij wtedy *Więcej informacji → Uruchom mimo to*.
 
 ## Pierwsze uruchomienie
@@ -198,6 +199,8 @@ Logi znajdziesz w *Ustawienia → Otwórz folder z logami* (`%APPDATA%\TuyaChrom
 | Nie widać ikony obok zegara | Windows 11 chowa nowe ikony pod strzałką **^** obok zegara. Żeby była zawsze widoczna: *Ustawienia Windows → Personalizacja → Pasek zadań → Inne ikony zasobnika systemowego → TuyaChroma: Wł.* Jeśli ikony nie ma nawet pod strzałką, zamknięcie okna nie chowa programu (zostaje zwykłym oknem), a w logu jest wpis „Tray icon…”. |
 | Program czeka na grę, a gra ma efekty | Gra nie używa Razer Chroma albo ma je wyłączone w swoich ustawieniach. |
 | Żarówka: „nie znaleziono w sieci” | Sprawdź, czy Zapora Windows zezwala TuyaChroma na dostęp do sieci prywatnej (*Zapora Windows → Zezwalaj aplikacji…*). Kliknij *Szukaj w sieci*. Jeśli nie pomoże, wpisz IP ręcznie (znajdziesz je w routerze lub aplikacji Smart Life). Komputer i żarówki muszą być w tej samej sieci. |
+| Żarówka: „błąd: … Device Unreachable” po restarcie komputera lub routera | Router zwykle dał żarówce nowy adres IP. Program po minucie sam szuka żarówek w sieci i zapisuje nowe adresy (w logu: „New bulb IPs”). Możesz też od razu kliknąć *Szukaj w sieci*. Żeby to się nie powtarzało, ustaw w routerze stałe IP (rezerwację DHCP) dla żarówek. |
+| Aktualizacja: „Windows Defender zablokował podmianę pliku” | Defender czasem bierze programy bez podpisu za podejrzane i na chwilę blokuje plik. Program próbuje kilka razy; jeśli to nie pomoże, spróbuj za kilka minut albo pobierz zip ręcznie. Możesz też dodać folder programu do wykluczeń Defendera. |
 | Żarówka: błąd połączenia | Kliknij *Testuj*. Wyłącz lokalne integracje tej żarówki w HA. Po ponownym sparowaniu żarówki w aplikacji zaloguj się ponownie, bo zmienia się wtedy jej klucz. |
 | „nieobsługiwana (brak koloru RGB)” | To żarówka tylko z białym światłem, więc nie może pokazywać kolorów. |
 | Logowanie QR się nie udaje | Kod użytkownika musi pochodzić z tej samej aplikacji, którą skanujesz. Kod QR jest ważny około 3 minut. |

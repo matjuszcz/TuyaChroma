@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 import zipfile
 
@@ -104,6 +105,30 @@ def check_latest(get=_get) -> Release | None:
     )
 
 
+def independent_env() -> dict[str, str]:
+    """Environment for starting a new, independent copy of the frozen program.
+
+    A one-file exe unpacks itself to a temporary _MEI folder that is deleted
+    when that process exits. A child started normally inherits variables that
+    make it reuse the parent's folder - so after an update the new version
+    lost its libraries once the old one quit (no tray icon, no TLS
+    certificates). PYINSTALLER_RESET_ENVIRONMENT makes it unpack its own copy.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("_PYI_") and k not in ("_MEIPASS2", "_MEIPASS")}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
+def start_detached(exe: Path, *args: str) -> None:
+    """Start another, fully independent instance of the program."""
+    flags = 0
+    if sys.platform == "win32":
+        flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    subprocess.Popen([str(exe), *args], env=independent_env(), close_fds=True,  # noqa: S603
+                     creationflags=flags)
+
+
 def can_self_update() -> bool:
     return getattr(sys, "frozen", False) and sys.platform == "win32"
 
@@ -140,7 +165,21 @@ def install(new_exe: Path, current_exe: Path) -> Path:
     old = current_exe.with_name(current_exe.name + ".old")
     if old.exists():
         old.unlink()
-    os.replace(current_exe, old)
+    for attempt in range(3):
+        try:
+            os.replace(current_exe, old)
+            break
+        except OSError as err:
+            # 225 = ERROR_VIRUS_INFECTED: Windows Defender is scanning/blocking the
+            # unsigned exe for a moment (false positive); it usually passes on retry.
+            if getattr(err, "winerror", None) != 225:
+                raise
+            if attempt == 2:
+                raise UpdateError(
+                    "Windows Defender zablokował podmianę pliku programu (częsty fałszywy alarm "
+                    "dla programów bez podpisu). Spróbuj ponownie za chwilę albo pobierz nową "
+                    "wersję ręcznie.") from err
+            time.sleep(2)
     try:
         shutil.move(str(new_exe), str(current_exe))
     except OSError:
@@ -178,4 +217,4 @@ def apply_update(release: Release, get=_get) -> None:
         raise UpdateError(f"nie można podmienić pliku programu ({err}) – pobierz nową wersję ręcznie") from err
     shutil.rmtree(work, ignore_errors=True)
     _LOGGER.info("Updated to %s, restarting", release.version)
-    subprocess.Popen([str(current), "--updated"], close_fds=True)  # noqa: S603
+    start_detached(current, "--updated", "--relaunched")
