@@ -444,6 +444,9 @@ def test_gui_shows_login_error_and_validates_version(tmp_path, monkeypatch) -> N
         assert config.devices[0].bulb_config().min_interval == 0.5
         app._load_editor()
         assert app.ed_speed.get() == gui.SPEED_LABELS[0.5]
+        app.ed_speed.set(gui.SPEED_LABELS[0.1])  # "bardzo szybko": smoother GU10s (opt-in)
+        app.save_editor()
+        assert config.devices[0].min_interval == 0.1 and config.devices[0].bulb_config().min_interval == 0.1
     finally:
         service.stop()
         app.root.destroy()

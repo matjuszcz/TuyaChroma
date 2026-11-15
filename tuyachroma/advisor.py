@@ -16,7 +16,7 @@ from .bulbs import STATUS_OFFLINE, STATUS_UNSUPPORTED
 _LOGGER = logging.getLogger(__name__)
 
 # Rates the bulb editor offers ("Szybkość zmian"): seconds between colors.
-SPEEDS = (0.15, 0.3, 0.5, 1.0)
+SPEEDS = (0.1, 0.15, 0.3, 0.5, 1.0)
 
 # Data points of strips with separately controlled LEDs (RGBIC / "Dreamcolor").
 SEGMENT_CODES = {
@@ -69,7 +69,8 @@ class Advice:
 
 
 def _speed_label(interval: float) -> str:
-    return {0.15: "szybko", 0.3: "średnio", 0.5: "wolno", 1.0: "bardzo wolno"}.get(interval, f"{interval} s")
+    return {0.1: "bardzo szybko", 0.15: "szybko", 0.3: "średnio", 0.5: "wolno",
+            1.0: "bardzo wolno"}.get(interval, f"{interval} s")
 
 
 def _slowest_needed(interval: float) -> float:
@@ -118,7 +119,7 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
                 needed, why = slow, f"odpowiada wolno (ok. {latency:.0f} ms)"
         if info.get("rate_not_the_cause"):
             # Slower colors didn't stop it dropping off: give the sync its speed back.
-            target = _slowest_needed(hint[0]) if hint is not None else SPEEDS[0]
+            target = _slowest_needed(hint[0]) if hint is not None else 0.15  # the default
             if dev.min_interval > target + 1e-9:
                 changes.append(Change(
                     dev.id, dev.name, "min_interval", dev.min_interval, target,

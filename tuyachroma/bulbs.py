@@ -62,7 +62,9 @@ MUSIC_FADE_MS = 100.0   # music data with transition "gradient": a short, quick 
 CONFIRM_EVERY = 0.0
 # How long to wait for an answer once connected: a light that skips one blocks
 # for this long, not for the 3 s connect timeout.
-REPLY_TIMEOUT = 0.7
+# GU10s answer in 60-110 ms but skip an answer now and then; this long the light
+# then gets no new color (was 0.7 s: a visible stop in smooth effects).
+REPLY_TIMEOUT = 0.35
 # A "confirmation" this slow is the reply timeout running out, not the light's
 # delay (must stay below REPLY_TIMEOUT, or a missing answer counts as 0.7 s delay).
 NO_ACK_MS = REPLY_TIMEOUT * 1000 * 0.9

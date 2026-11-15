@@ -72,6 +72,7 @@ METHOD_LABELS = {
 }
 # Device.min_interval (s between colors) -> label
 SPEED_LABELS = {
+    0.1: "bardzo szybko – do 10 zmian/s (płynniej, próbnie)",
     0.15: "szybko – do 7 zmian/s (domyślnie)",
     0.3: "średnio – ok. 3 zmiany/s",
     0.5: "wolno – 2 zmiany/s",
