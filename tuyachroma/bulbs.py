@@ -62,6 +62,40 @@ SLOW_RECOVER = 30.0   # after this long without problems, try sending faster aga
 _learned_slow: dict[str, float] = {}
 
 
+# Some lights reboot after a fixed time on one connection (Lampka Biurko, a
+# Battletron light bar: always ~183 s after connecting). Once two drops happen
+# after about the same time, the connection is renewed before that.
+_drop_ages: dict[str, list[float]] = {}
+_max_age: dict[str, float] = {}
+SAME_AGE = 15.0      # drops this close together count as "the same time"
+RENEW_EARLY = 30.0   # renew this long before the learned limit
+MIN_AGE = 60.0       # only learn limits above this
+
+
+class _Renew(Exception):
+    """Internal: renew the connection now (no error, no pause)."""
+
+
+def _record_drop_age(dev_id: str, name: str, age: float) -> None:
+    if age < MIN_AGE:
+        return
+    ages = _drop_ages.setdefault(dev_id, [])
+    ages.append(age)
+    del ages[:-3]
+    close = [a for a in ages if abs(a - age) <= SAME_AGE]
+    if len(close) >= 2 and dev_id not in _max_age:
+        _max_age[dev_id] = min(close) - RENEW_EARLY
+        # Not too many colors after all: the connection's age is the cause.
+        _learned_slow.pop(dev_id, None)
+        _LOGGER.info("%s: drops off ~%.0f s after connecting - renewing the connection every "
+                     "%.0f s from now on", name, min(close), _max_age[dev_id])
+
+
+def learned_max_age(dev_id: str) -> float:
+    """> 0: renew this light's connection after this many seconds."""
+    return _max_age.get(dev_id, 0.0)
+
+
 def learned_slow_interval(dev_id: str) -> float:
     """> 0 if the bulb dropped off Wi-Fi while getting colors in this session."""
     return _learned_slow.get(dev_id, 0.0)
@@ -159,6 +193,7 @@ class BulbWorker(threading.Thread):
         self._hold = False
         self._capture: tuple[threading.Event, dict] | None = None
         self._reported = False
+        self._connected_at = 0.0
 
     # ------------------------------------------------------------ public API
 
@@ -242,9 +277,17 @@ class BulbWorker(threading.Thread):
                     _LOGGER.info("%s: reachable again", self.cfg.name)
                 failures = 0
                 sends_before = self._send_count
+                self._connected_at = time.monotonic()
                 try:
                     self._loop()
+                except _Renew:
+                    _LOGGER.debug("%s: renewing the connection", self.cfg.name)
+                    self._disconnect()
+                    continue
                 except Exception as err:  # noqa: BLE001
+                    if isinstance(err, BulbOffline):
+                        _record_drop_age(self.cfg.id, self.cfg.name,
+                                         time.monotonic() - self._connected_at)
                     if self._send_count == sends_before:
                         raise  # nothing got through since connecting: normal retry with pauses
                     # It worked a moment ago: reconnect right away, not after a pause.
@@ -322,15 +365,23 @@ class BulbWorker(threading.Thread):
 
     def _loop(self) -> None:
         last_send = 0.0
-        last_contact = time.monotonic()
+        last_beat = time.monotonic()
         with self._lock:
             if self._in_sync_mode and self._target is None:
                 # A restore was interrupted by a connection error: retry it now.
                 self._restore_requested = True
                 self._wake.set()
+            elif self._target is not None:
+                self._wake.set()  # (re)connected: show the current color right away
         while not self._stopping.is_set():
             following = callable(self._target)
-            self._wake.wait(timeout=self._interval() if following else min(5.0, HEARTBEAT_EVERY))
+            timeout = self._interval() if following else min(5.0, HEARTBEAT_EVERY)
+            elapsed = time.monotonic()
+            timeout = min(timeout, max(0.01, HEARTBEAT_EVERY - (elapsed - last_beat)))
+            max_age = _max_age.get(self.cfg.id, 0.0)
+            if max_age:  # wake up in time to renew the connection
+                timeout = min(timeout, max(0.01, max_age - (elapsed - self._connected_at)))
+            self._wake.wait(timeout=timeout)
             self._wake.clear()
             if self._stopping.is_set():
                 return
@@ -338,6 +389,13 @@ class BulbWorker(threading.Thread):
                 target, restore = self._target, self._restore_requested
                 self._restore_requested = False
             now = time.monotonic()
+            max_age = _max_age.get(self.cfg.id, 0.0)
+            if max_age and now - self._connected_at > max_age and self._capture is None:
+                raise _Renew
+            if now - last_beat > HEARTBEAT_EVERY:
+                # Always, also while colors are flowing: some lights expect it.
+                check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
+                last_beat = now
             if self._capture is not None:
                 done, result = self._capture
                 self._capture = None
@@ -347,31 +405,20 @@ class BulbWorker(threading.Thread):
                         result["dps"] = dict(reply["dps"])
                 finally:
                     done.set()  # never leave the caller waiting, even on a network error
-                last_contact = now
                 continue
             if self._hold:
-                if now - last_contact > HEARTBEAT_EVERY:
-                    check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
-                    last_contact = now
-                continue
+                continue  # the heartbeat above keeps the connection alive
             if restore:
                 self._restore()
                 self._scene_sent = None
-                last_contact = now
                 continue
             if isinstance(target, NativeScene):
                 if self._scene_sent != target:
                     self._send_scene(target)
-                    last_send = last_contact = time.monotonic()
-                elif now - last_contact > HEARTBEAT_EVERY:
-                    check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
-                    last_contact = now
+                    last_send = time.monotonic()
                 continue
             if target is None:
-                if now - last_contact > HEARTBEAT_EVERY:  # keep the persistent socket alive
-                    check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
-                    last_contact = now
-                continue
+                continue  # idle: only the heartbeat above
             floor = _learned_slow.get(self.cfg.id, 0.0)
             if self.slow_interval > floor and now - self._last_problem > SLOW_RECOVER:
                 halved = self.slow_interval / 2
@@ -392,7 +439,7 @@ class BulbWorker(threading.Thread):
                     and now - last_send < REFRESH_EVERY):
                 continue
             self._send(target)
-            last_send = last_contact = time.monotonic()
+            last_send = time.monotonic()
 
     def _send(self, rgb: RGB) -> None:
         dev = self._dev
@@ -461,7 +508,9 @@ class BulbWorker(threading.Thread):
         """The bulb stopped confirming colors: send them less often for a while."""
         self.slow_interval = min(max(self.slow_interval * 2, self.cfg.min_interval * 2, 0.3), SLOW_MAX)
         self._last_problem = time.monotonic()
-        if dropped_off:
+        if dropped_off and self.cfg.id in _max_age:
+            _LOGGER.info("%s: sending at most every %.2f s for a while", self.cfg.name, self.slow_interval)
+        elif dropped_off:
             # It vanished from the network (probably rebooted): stay slower for good.
             _learned_slow[self.cfg.id] = self.slow_interval
             _LOGGER.info("%s: dropped off the network while syncing - sending at most every "

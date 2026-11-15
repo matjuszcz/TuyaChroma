@@ -141,6 +141,10 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
                          "jest jednym punktem fali razem z żarówkami.")
         if codes & MUSIC_CODES and dev.method == "colour":
             music.append(dev.name)
+        if info.get("renew_every"):
+            notes.append(f"{dev.name}: restartuje się po ok. {info['renew_every'] + 30:.0f} s jednego "
+                         f"połączenia – program odnawia połączenie co {info['renew_every']:.0f} s, "
+                         "zanim do tego dojdzie.")
         if status == STATUS_OFFLINE or status.startswith("błąd"):
             notes.append(f"{dev.name}: teraz nieosiągalna ({status}). Jeśli jest włączona, kliknij "
                          "„Szukaj w sieci”.")
