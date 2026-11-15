@@ -159,7 +159,12 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
             notes.append(f"{dev.name}: restartuje się po ok. {info['renew_every'] + 30:.0f} s jednego "
                          f"połączenia – program odnawia połączenie co {info['renew_every']:.0f} s, "
                          "zanim do tego dojdzie.")
-        if status == STATUS_OFFLINE or status.startswith("błąd"):
+        if "914" in status or "device key" in status:
+            notes.append(f"{dev.name}: odrzuca połączenie (błąd 914 – klucz lub zawieszona żarówka). "
+                         "Wyłącz ją na kilka sekund (wyłącznik lub zasilanie) i włącz. Jeśli nie pomoże, "
+                         "zmienił się jej klucz (np. po ponownym sparowaniu): zaloguj się ponownie "
+                         "kodem QR i kliknij „Odśwież z konta”.")
+        elif status == STATUS_OFFLINE or status.startswith("błąd"):
             notes.append(f"{dev.name}: teraz nieosiągalna ({status}). Jeśli jest włączona, kliknij "
                          "„Szukaj w sieci”.")
         if not dev.ip:

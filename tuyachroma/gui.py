@@ -1263,6 +1263,8 @@ class App:
         def failed(err: Exception) -> None:
             _LOGGER.warning("Auto settings: account data unavailable: %s", err)
             self._show_advice()
+            if "QR" in str(err):
+                self.set_busy(str(err))  # the saved login expired: say so
 
         self.run_bg(fetch, done, failed)
 

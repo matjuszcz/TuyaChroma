@@ -108,3 +108,12 @@ def test_real_setup_from_a_log() -> None:
     assert "Lampa TV" not in text and "Jadalnia" not in text  # not controlled by Razer
     assert text.count("20 segmentów") == 2  # what is known about Battletron lights
     assert len(advice.report) == 5  # the report still lists everything
+
+
+def test_error_914_explains_what_to_do() -> None:
+    """1.9.19 log: RGB Biuro 2 rejected every connection with 'Check device key or version'."""
+    b2 = dev("b2", name="RGB Biuro 2")
+    status = "błąd: no status from bulb ({'Error': 'Check device key or version', 'Err': '914'})"
+    text = "\n".join(advisor.advise([b2], {"b2": {"status": status}}).notes)
+    assert "błąd 914" in text and "Wyłącz ją" in text and "kodem QR" in text
+    assert "Szukaj w sieci" not in text  # a new IP would not help here

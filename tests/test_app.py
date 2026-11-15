@@ -1008,3 +1008,24 @@ def test_window_creation_retries(monkeypatch) -> None:
     calls.clear()
     with pytest.raises(gui.tk.TclError):
         gui.new_tk_root(attempts=2)
+
+
+def test_expired_login_asks_for_a_new_qr_login(monkeypatch) -> None:
+    """1.9.19 log: '(1010) token is expired' then 'sign invalid' - an unreadable error."""
+    import sys as _sys
+    import types
+
+    from tuyachroma import cloud
+
+    class Manager:
+        def __init__(self, *a, **k):
+            pass
+
+        def update_device_cache(self):
+            raise RuntimeError("network error:(-9999999) sign invalid")
+
+    fake = types.SimpleNamespace(Manager=Manager, SharingTokenListener=object)
+    monkeypatch.setitem(_sys.modules, "tuya_sharing", fake)
+    session = {"user_code": "u", "terminal_id": "t", "endpoint": "e", "token_info": {}}
+    with pytest.raises(cloud.TuyaCloudError, match="zaloguj się ponownie kodem QR"):
+        cloud.fetch_with_session(session)

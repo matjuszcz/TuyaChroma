@@ -120,6 +120,10 @@ class TuyaAccount:
         return devices
 
 
+# Errors of a saved login that can't be renewed (needs a new QR login).
+EXPIRED_MARKERS = ("token is expired", "sign invalid", "(1010)", "token invalid")
+
+
 def fetch_with_session(session: dict[str, Any]) -> tuple[list[CloudDevice], dict[str, Any]]:
     """List the account's devices with a saved login (refreshes the token if needed).
 
@@ -143,6 +147,12 @@ def fetch_with_session(session: dict[str, Any]) -> tuple[list[CloudDevice], dict
     except KeyError as err:
         raise TuyaCloudError("Brak zapisanego logowania") from err
     except Exception as err:  # noqa: BLE001 - network / auth errors from the SDK
+        text = str(err).lower()
+        if any(m in text for m in EXPIRED_MARKERS):
+            # The saved login can't be renewed any more (token expired and the
+            # refresh is rejected: "1010 token is expired", "sign invalid").
+            raise TuyaCloudError("Logowanie do konta Tuya wygasło – zaloguj się ponownie kodem QR "
+                                 "(zakładka „Konto Tuya”). Światła i ustawienia zostają.") from err
         raise TuyaCloudError(f"Nie udało się pobrać urządzeń: {err}") from err
     if not manager.user_homes and not manager.device_map:
         raise TuyaCloudError("Logowanie wygasło – zaloguj się ponownie kodem QR")

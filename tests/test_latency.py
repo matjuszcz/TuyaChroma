@@ -385,30 +385,33 @@ def test_unchanged_value_does_not_block_the_light(monkeypatch) -> None:
         worker.stop(2)
 
 
-def test_colour_mode_does_not_wait_for_every_answer() -> None:
-    """1.9.17 log: GU10s left changing colors unanswered too (2.5-3 s stalls in Spectrum)."""
-    waited = []
+def test_colour_mode_reads_every_answer_with_a_short_timeout() -> None:
+    """Unread answers piled up on the connection in 1.9.18 (RGB Biuro 2 then rejected
+    every connection, error 914). Every colour-mode color now reads its answer, and a
+    missing answer blocks for REPLY_TIMEOUT (0.7 s), not the 3 s connect timeout."""
+    timeouts, waited = [], []
 
-    class Slow(FakeBulb):
+    class GU10(FakeBulb):
+        def set_socketTimeout(self, seconds):
+            timeouts.append(seconds)
+
         def set_multiple_values(self, values, nowait=False):
             super().set_multiple_values(values, nowait)
-            if "24" in values and not nowait:
-                waited.append(1)
-                time.sleep(0.3)  # an answer that never comes
+            if "24" in values:
+                waited.append(not nowait)
 
-    bulb = Slow(music=False)
-    worker = BulbWorker(BulbConfig(name="RGB Biuro 3", id="b3", ip="1", local_key="k", min_interval=0.02,
+    bulb = GU10(music=False)
+    worker = BulbWorker(BulbConfig(name="RGB Biuro 2", id="b2", ip="1", local_key="k", min_interval=0.02,
                                    method="colour"), device_factory=lambda _c: bulb)
     worker.start()
     try:
         assert wait_for(lambda: worker.connected)
-        start = time.monotonic()
-        for i in range(20):
-            worker.set_color((10 * i, 100, 200 - 5 * i))
-            time.sleep(0.03)
-        assert wait_for(lambda: sum(1 for k, v in bulb.sent if "24" in v) >= 8, 2)  # colors keep flowing
-        assert len(waited) <= 2                 # only the takeover / an occasional check waits
-        assert time.monotonic() - start < 2.0   # the light never stalled
+        assert timeouts == [bulbs.REPLY_TIMEOUT]
+        for i in range(8):
+            worker.set_color((20 * i, 100, 200 - 10 * i))
+            time.sleep(0.04)
+        assert wait_for(lambda: len(waited) >= 5)
+        assert all(waited)  # every answer is read
     finally:
         worker.stop(2)
 

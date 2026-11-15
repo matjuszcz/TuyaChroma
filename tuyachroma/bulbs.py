@@ -56,7 +56,13 @@ RETRY_FIRST = 5.0
 # so the fade ends together with the Razer devices).
 COLOUR_FADE_MS = 250.0  # colour mode: the light's own fade
 MUSIC_FADE_MS = 100.0   # music data with transition "gradient": a short, quick fade
-CONFIRM_EVERY = 3.0  # s: one color in this time waits for the light's answer
+# Colour mode: every color waits for the light's answer (it answers a changed
+# value). 1.9.18 sent most without reading the answers; they piled up unread on
+# the connection, which may hang a light (RGB Biuro 2: error 914 since). 0 = all.
+CONFIRM_EVERY = 0.0
+# How long to wait for an answer once connected: a light that skips one blocks
+# for this long, not for the 3 s connect timeout.
+REPLY_TIMEOUT = 0.7
 NO_ACK_MS = 2000.0  # a "confirmation" this slow is the timeout, not the light's delay
 HEARTBEAT_EVERY = 8.0  # keep the persistent socket alive (and notice a light that rebooted)
 REFRESH_EVERY = 10.0  # resend an unchanged color: a bulb that rebooted shows it again
@@ -379,6 +385,9 @@ class BulbWorker(threading.Thread):
         if not dev.bulb_configured or not dev.dpset.get("colour"):
             dev.close()
             raise UnsupportedBulb("device is not a color (RGB) bulb")
+        set_timeout = getattr(dev, "set_socketTimeout", None)
+        if callable(set_timeout):
+            set_timeout(REPLY_TIMEOUT)  # connected: don't wait 3 s for a missing answer
         self._dev = dev
         self.dps = sorted((str(k) for k in status["dps"]), key=lambda k: (len(k), k))
         method = self.cfg.method
