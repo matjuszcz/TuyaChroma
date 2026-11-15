@@ -101,9 +101,10 @@ def test_real_setup_from_a_log() -> None:
                "b1": {"status": bulbs.STATUS_SYNC, "latency_ms": 70,
                       "dps": ["20", "21", "22", "23", "24", "25", "26", "34"]}}
     advice = advisor.advise(devices, details)
-    assert advice.changes == []  # Lampka Biurko is already on "wolno"
+    # Lampka Biurko is already on "wolno"; the Battletron strip gets "średnio"
+    assert [(c.dev_id, c.new) for c in advice.changes] == [("ls", 0.3)]
     text = "\n".join(advice.notes)
     assert "Lampa TV" not in text and "Jadalnia" not in text  # not controlled by Razer
     assert text.count("Tryb Music") == 1 and "Lampka Biurko, Led Strip, RGB Biuro 1" in text
-    assert "możliwe, że to RGBIC" in text  # DP 53 without confirmation from the account
+    assert text.count("20 segmentów") == 2  # what is known about Battletron lights
     assert len(advice.report) == 5  # the report still lists everything

@@ -26,6 +26,25 @@ SEGMENT_CODES = {
 MUSIC_CODES = {"music_data", "dreamlightmic_music_data"}
 STRIP_CATEGORIES = {"dd", "fwd", "fwl"}  # LED strips, ambient lights
 
+# What is known about specific products (matched in the product name, lower case):
+# (slowest safe interval between colors in s, note)
+PRODUCT_HINTS = {
+    # Action's gaming lights (LSC Smart Connect / Tuya, BK7231N). Community reverse
+    # engineering (github.com/niels-emmer/tuya-lightbar-control): "below ~0.2 s
+    # the device starts dropping commands"; 20 segments on DP 61, one write per
+    # segment with >= 0.25 s between them, so a full bar takes ~5 s.
+    "battletron": (0.3, "Battletron (Action / LSC Smart): przy kolorach częściej niż co ok. 0,2 s "
+                        "zaczyna gubić polecenia i potrafi się zawiesić. Ma 20 segmentów, ale każdy "
+                        "trzeba ustawiać osobno (ok. 0,25 s na segment, cała listwa ok. 5 s), więc "
+                        "płynna fala wzdłuż listwy nie jest możliwa – program steruje nią jednym "
+                        "kolorem, a w efekcie Wave jest ona jednym punktem fali."),
+}
+
+
+def product_hint(dev) -> tuple[float, str] | None:
+    name = (getattr(dev, "product_name", "") or "").lower()
+    return next((hint for key, hint in PRODUCT_HINTS.items() if key in name), None)
+
 
 @dataclass
 class Change:
@@ -85,6 +104,9 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
         #    one that answers slowly, gets colors less often.
         needed = 0.0
         why = ""
+        hint = product_hint(dev)
+        if hint is not None and hint[0] > needed:
+            needed, why = hint[0], "ten model gubi polecenia przy szybszych zmianach"
         dropped = float(info.get("dropped_off") or 0.0)
         if dropped:
             needed = max(dropped, 0.5)
@@ -103,7 +125,9 @@ def advise(devices: list, details: dict[str, dict], settings: Any = None) -> Adv
         # 3. Things to know, no automatic change.
         if not dev.enabled:
             continue  # only the lights Razer controls get notes
-        if codes & SEGMENT_CODES:
+        if hint is not None:
+            notes.append(f"{dev.name}: {hint[1]}")
+        elif codes & SEGMENT_CODES:
             notes.append(f"{dev.name}: listwa z osobno sterowanymi diodami (RGBIC). Program steruje nią "
                          "jednym kolorem; fala wzdłuż listwy wymaga obsługi segmentów (planowana).")
         elif dev.category in STRIP_CATEGORIES and {"51", "53", "61"} & set(dps):
