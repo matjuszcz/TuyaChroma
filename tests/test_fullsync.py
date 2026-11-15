@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import time
 
+import pytest
+
 from tuyachroma import engine
 from tuyachroma.config import AppConfig, Device
 from tuyachroma.player import EffectPlayer
@@ -740,3 +742,32 @@ def test_wave_runs_across_lights_on_chroma_link() -> None:
         time.monotonic = real
     assert len(set(colors)) == 5          # a wave, not one mixed color
     assert colors == expected              # exactly the Chroma Link LEDs (e.g. the ARGB controller)
+
+
+def _saturation(rgb):
+    return max(rgb) - min(rgb)
+
+
+@pytest.mark.parametrize("source", ["mouse", "mousepad", "headset", "keypad", "chromalink"])
+def test_every_source_follows_the_wave(source) -> None:
+    """Averaging a whole device made a wave grey (128,128,128) on every light."""
+    renderer = Renderer(Profile(effect="wave", speed=5))
+    spec = DEVICES[source]
+    frame = renderer.frame(source, spec.width, spec.height, 100.0)
+    one = _Light(0, source=source)
+    single = engine.link_color(one.cfg, frame, engine.link_slot([one], one))
+    assert _saturation(single) > 150  # a real color, not grey
+    lights = [_Light(i, source=source) for i in range(3)]
+    colors = [engine.link_color(lt.cfg, frame, engine.link_slot(lights, lt)) for lt in lights]
+    assert len(set(colors)) == 3 and all(_saturation(c) > 150 for c in colors)  # the wave runs on
+
+
+@pytest.mark.parametrize("source", ["mouse", "mousepad", "headset", "keypad", "chromalink"])
+def test_every_source_follows_a_game(source) -> None:
+    spec = DEVICES[source]
+    lit = [(0, 0, 0)] * spec.count
+    lit[0] = (255, 40, 0)  # the game lights only one LED (e.g. a mouse's side)
+    lights = [_Light(i, source=source) for i in range(2)]
+    engine.dispatch(lights, {source: Frame(source, 7, lit, 1)}, "full", True)
+    for lt in lights:
+        assert lt.colors[-1] == (255, 40, 0)  # nobody dark, the game's color

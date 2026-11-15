@@ -50,26 +50,45 @@ def bulb_color(cfg: BulbConfig, frame: Frame, keyboard_area=None) -> RGB:
 LINK_LEDS = 5  # Chroma Link: one "LED" per linked device
 
 
-def link_slot(workers: list, worker) -> int | None:
-    """Which Chroma Link LED this light shows (lights on the whole Chroma Link).
+def link_slot(workers: list, worker) -> tuple[int, int] | None:
+    """(position, count) of a light among the lights on the same whole Razer device.
 
-    Chroma Link carries one color per linked device; averaging all five mixed
-    them (a dull, identical color on every light). Lights set to it take its
-    LEDs in list order: the 1st light LED 1, the 2nd LED 2, ...
+    Averaging a whole device mixes its colors (a wave turns grey). Instead, the
+    lights on one device share it: on Chroma Link one LED each (one color per
+    linked device), on other devices one part each from left to right, and a
+    single light shows the device's middle. The keyboard is handled as the
+    wave across all lights instead (see follows_bulb_strip).
     """
-    if worker.cfg.source != "chromalink" or worker.cfg.zone != "all":
+    cfg = worker.cfg
+    if cfg.zone != "all" or getattr(cfg, "source", "keyboard") == "keyboard":
         return None
-    linked = [w for w in workers if w.cfg.source == "chromalink" and w.cfg.zone == "all"]
-    try:
-        return linked.index(worker) % LINK_LEDS
-    except ValueError:
+    group = [w for w in workers if w.cfg.zone == "all" and w.cfg.source == cfg.source]
+    if worker not in group:
         return None
+    return group.index(worker), len(group)
 
 
-def link_color(cfg: BulbConfig, colors: list[RGB], slot: int) -> RGB:
-    rgb = colors[slot] if slot < len(colors) else colors[0]
-    if max(rgb) < 8 and colors and max(colors[0]) >= 8:
-        rgb = colors[0]  # a game that only sets the first LED: don't go dark
+def link_color(cfg: BulbConfig, colors: list[RGB], slot: tuple[int, int] | int) -> RGB:
+    """The color of this light's part of its Razer device."""
+    position, count = slot if isinstance(slot, tuple) else (slot, 1)
+    spec = DEVICES[cfg.source]
+    if not colors:
+        return (0, 0, 0)
+    if cfg.source == "chromalink":
+        rgb = colors[position % len(colors)]
+        if max(rgb) < 8 and max(colors[0]) >= 8:
+            rgb = colors[0]  # a game that only sets the first LED: don't go dark
+        return adjust(rgb, cfg.brightness, cfg.min_brightness)
+    w = spec.width
+    if count <= 1:
+        cols = [w // 2]  # one light: the middle of the device (e.g. the mouse logo)
+    else:
+        first = position * w // count
+        cols = list(range(first, max(first + 1, (position + 1) * w // count)))
+    part = [colors[y * w + x] for y in range(spec.height) for x in cols if y * w + x < len(colors)]
+    rgb = reduce_colors(part, cfg.mode)
+    if max(rgb) < 8:
+        rgb = reduce_colors(colors, cfg.mode)  # that part is dark (e.g. no LED there): whole device
     return adjust(rgb, cfg.brightness, cfg.min_brightness)
 
 
@@ -126,10 +145,6 @@ class AliveCache:
 # A newly seen Chroma app gets the Razer devices for this long; if it shows no
 # effect in that time it is a background app (e.g. a wallpaper program), not a
 # game, and the program takes the devices back and ignores it.
-# Lights in colour mode fade to each new color; sent this much earlier (ms) the
-# fade ends about when the Razer devices show the color (auto delay mode).
-FADE_MS = 250.0
-
 # A game's effect that pauses for a moment (Cyberpunk 2077: ~70 ms every
 # ~0.7 s) is held: the lights keep the game's last colors instead of
 # flickering to the program's profile and back.
@@ -214,8 +229,8 @@ def dispatch(
             if (strip and index < len(strip)
                     and (profile is None or follows_bulb_strip(worker.cfg, profile))):
                 rgb = adjust(strip[index], worker.cfg.brightness, worker.cfg.min_brightness)
-            elif slot is not None and profile_frames.get("chromalink"):
-                rgb = link_color(worker.cfg, profile_frames["chromalink"], slot)
+            elif slot is not None and profile_frames.get(worker.cfg.source):
+                rgb = link_color(worker.cfg, profile_frames[worker.cfg.source], slot)
             else:
                 rgb = zone_color(worker.cfg, profile_frames.get(worker.cfg.source, []), keyboard_area)
             worker.set_color(rgb)
@@ -495,8 +510,7 @@ class SyncService:
         """How far ahead (ms) an effect color is sent to this bulb."""
         if settings.latency_mode == "auto":
             base = getattr(worker, "latency_ms", None) or 0.0
-            if not getattr(worker, "use_music", True):
-                base += FADE_MS  # in colour mode the light fades to each new color
+            base += getattr(worker, "fade_ms", 0.0)  # the light's fade ends on time
         elif settings.latency_mode == "manual":
             base = float(settings.latency_ms)
         else:

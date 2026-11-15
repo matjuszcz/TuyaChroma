@@ -65,9 +65,10 @@ LAYOUT_LABELS = {
     "mini": "60% (np. Huntsman Mini)",
 }
 METHOD_LABELS = {
-    "auto": "Automatycznie (natychmiast, jeśli obsługuje)",
-    "colour": "Kolor (płynne przejścia)",
-    "music": "Music (szybszy, nie każda żarówka)",
+    "auto": "Automatycznie – płynnie (zalecane)",
+    "colour": "Kolor – wolniejsze płynne przejścia",
+    "music": "Music – szybkie płynne przejścia (wymuś)",
+    "jump": "Natychmiast – bez przejść",
 }
 # Device.min_interval (s between colors) -> label
 SPEED_LABELS = {

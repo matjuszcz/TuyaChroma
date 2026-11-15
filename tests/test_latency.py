@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
-from tuyachroma import engine
+from tuyachroma import bulbs, engine
 from tuyachroma.bulbs import BulbConfig, BulbWorker
 from tuyachroma.config import AppConfig, Device, load, save
 from tuyachroma.profiles import Profile
@@ -235,15 +235,45 @@ def test_auto_mode_uses_instant_changes_where_supported() -> None:
             worker.stop(2)
 
 
-def test_offset_includes_fade_and_hold() -> None:
+def test_offset_includes_the_lights_fade() -> None:
     s = AppConfig().settings
-    fading = SimpleNamespace(latency_ms=60, use_music=False, cfg=SimpleNamespace(latency_adjust_ms=0))
-    instant = SimpleNamespace(latency_ms=60, use_music=True, cfg=SimpleNamespace(latency_adjust_ms=0))
     off = engine.SyncService.latency_offset_ms
-    assert off(fading, s) == 60 + engine.FADE_MS
-    assert off(instant, s) == 60
+
+    def light(fade):
+        return SimpleNamespace(latency_ms=60, fade_ms=fade, cfg=SimpleNamespace(latency_adjust_ms=0))
+
+    assert off(light(bulbs.COLOUR_FADE_MS), s) == 60 + bulbs.COLOUR_FADE_MS
+    assert off(light(bulbs.MUSIC_FADE_MS), s) == 60 + bulbs.MUSIC_FADE_MS
+    assert off(light(0.0), s) == 60
     s.latency_mode = "manual"
-    assert off(fading, s) == s.latency_ms  # manual means exactly what the user set
+    assert off(light(bulbs.COLOUR_FADE_MS), s) == s.latency_ms  # manual means exactly what was set
+
+
+def test_methods_keep_profiles_smooth() -> None:
+    """Razer profiles flow smoothly: every mode but "jump" fades between colors."""
+    cases = {  # method, codes -> (music data?, transition, fade)
+        ("auto", ("control_data",)): (True, 1, bulbs.MUSIC_FADE_MS),
+        ("auto", ("music_data",)): (False, 1, bulbs.COLOUR_FADE_MS),  # Battletron: colour mode
+        ("colour", ("control_data",)): (False, 1, bulbs.COLOUR_FADE_MS),
+        ("music", ()): (True, 1, bulbs.MUSIC_FADE_MS),
+        ("jump", ()): (True, 0, 0.0),
+    }
+    for (method, codes), expected in cases.items():
+        bulb = FakeBulb(music=True)
+        worker = BulbWorker(BulbConfig(name="x", id="x", ip="1", local_key="k", method=method,
+                                       codes=codes, min_interval=0.02),
+                            device_factory=lambda _c, b=bulb: b)
+        worker.start()
+        try:
+            assert wait_for(lambda: worker.connected)
+            assert (worker.use_music, worker.transition, worker.fade_ms) == expected, method
+            if worker.use_music:
+                sent = []
+                bulb.set_music_colour = lambda t, r, g, b_, nowait=False: sent.append(t)
+                worker.set_color((10, 200, 30))
+                assert wait_for(lambda: sent) and sent[0] == expected[1]
+        finally:
+            worker.stop(2)
 
 
 def test_precise_color_is_for_the_middle_of_the_hold() -> None:

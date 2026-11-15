@@ -52,6 +52,10 @@ OFFLINE_ERRORS = {"901", "905"}
 # 902 = no answer in time, 914 = connection garbled (key/version): the link is broken
 LINK_ERRORS = {"902", "914"}
 RETRY_FIRST = 5.0
+# How long a light fades to each new color (sent this much earlier in effects,
+# so the fade ends together with the Razer devices).
+COLOUR_FADE_MS = 250.0  # colour mode: the light's own fade
+MUSIC_FADE_MS = 100.0   # music data with transition "gradient": a short, quick fade
 HEARTBEAT_EVERY = 8.0  # keep the persistent socket alive (and notice a light that rebooted)
 REFRESH_EVERY = 10.0  # resend an unchanged color: a bulb that rebooted shows it again
 SLOW_MAX = 1.0        # slowest sending rate (s) for a bulb that can't keep up
@@ -144,8 +148,10 @@ class BulbConfig:
     mode: str = "vivid"
     brightness: float = 1.0
     min_brightness: float = 0.05
-    # auto: instant changes (music/control data, no fade) when the account lists
-    # "control_data" for the light, else colour | colour: always fade | music
+    # auto:   smooth music/control-data fades where the account lists
+    #         "control_data" (quick, like the app's music sync), else colour
+    # colour: the light's normal (slower) fade      music: music fades (forced)
+    # jump:   instant changes, no transition at all
     method: str = "auto"
     codes: tuple[str, ...] = ()  # the light's data points from the Tuya account
     min_interval: float = 0.15
@@ -192,6 +198,8 @@ class BulbWorker(threading.Thread):
         self._original: dict[str, Any] = {}
         self._in_sync_mode = False
         self.use_music = False
+        self.transition = 1
+        self.fade_ms = COLOUR_FADE_MS  # how long the light takes to fade to a new color
         self.connected = False
         self.status = STATUS_CONNECTING
         self.latency_ms: float | None = None  # measured: color sent -> bulb confirmed
@@ -371,7 +379,14 @@ class BulbWorker(threading.Thread):
         if method == "auto":
             self.use_music = can_music and "control_data" in self.cfg.codes
         else:
-            self.use_music = can_music and method == "music"
+            self.use_music = can_music and method in ("music", "jump")
+        # Razer profiles flow smoothly, so the lights fade too (music data with
+        # transition 1 = gradient); only "jump" changes instantly (transition 0).
+        self.transition = 0 if method == "jump" else 1
+        if self.use_music:
+            self.fade_ms = 0.0 if self.transition == 0 else MUSIC_FADE_MS
+        else:
+            self.fade_ms = COLOUR_FADE_MS
         if method == "music" and not dev.dpset.get("music"):
             _LOGGER.warning("%s: music mode not supported, using colour mode", self.cfg.name)
         self._sent = None
@@ -490,7 +505,7 @@ class BulbWorker(threading.Thread):
             if not self._in_sync_mode or scene_was_on:
                 dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"})
             started = time.perf_counter()
-            check_reply(dev.set_music_colour(0, r, g, b), "color")
+            check_reply(dev.set_music_colour(self.transition, r, g, b), "color")
         else:
             values = {dps["colour"]: tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])}
             if not self._in_sync_mode or scene_was_on:
