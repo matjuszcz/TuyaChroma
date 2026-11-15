@@ -771,3 +771,38 @@ def test_every_source_follows_a_game(source) -> None:
     engine.dispatch(lights, {source: Frame(source, 7, lit, 1)}, "full", True)
     for lt in lights:
         assert lt.colors[-1] == (255, 40, 0)  # nobody dark, the game's color
+
+
+def _fake_screen(w, h):
+    """Left third red, middle green, right blue; a dark taskbar at the bottom."""
+    out = []
+    for y in range(h):
+        for x in range(w):
+            if y >= h - 2:
+                out.append((20, 20, 20))
+            elif x < w // 3:
+                out.append((220, 30, 30))
+            elif x < w - w // 3:
+                out.append((30, 220, 30))
+            else:
+                out.append((30, 30, 220))
+    return out
+
+
+def test_ambient_lights_show_their_part_of_the_screen() -> None:
+    """Ambient: each light shows its part of the desktop, not one average of all of it."""
+    service = engine.SyncService(layout_detector=lambda: "full", own_pid=OWN)
+    renderer = Renderer(Profile(effect="ambient"), screen=_fake_screen)
+    service.player = type("P", (), {"renderer": renderer})()
+    lights = [_Light(i, source="keyboard") for i in range(3)]
+    service.workers = lights
+    settings = AppConfig().settings
+    settings.latency_mode = "off"
+    colors = [service._bulb_effect_color(lt, i, 3, settings, renderer.profile) for i, lt in enumerate(lights)]
+    dominant = [max(range(3), key=lambda c, rgb=rgb: rgb[c]) for rgb in colors]
+    assert dominant == [0, 1, 2]  # left red, middle green, right blue
+    assert all(max(c) > 180 for c in colors)  # the dark taskbar doesn't dim them
+    # a light with a zone shows that part, wherever it is in the list
+    right = _Light(9, source="keyboard", zone="right")
+    rgb = service._bulb_effect_color(right, 0, 3, settings, renderer.profile)
+    assert max(range(3), key=lambda c: rgb[c]) == 2

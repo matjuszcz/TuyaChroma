@@ -74,6 +74,7 @@ Jeśli starsze urządzenie albo starsza wersja Synapse nie obsługuje rozszerzon
 **Uwagi:**
 * *Reactive* i *Ripple* odczytują, **który** klawisz naciśnięto (tylko jego pozycję, nic nie jest zapisywane), tak samo jak Synapse. Program robi to tylko przy tych dwóch efektach.
 * *Ambient Awareness* kilka razy na sekundę robi pomniejszoną kopię ekranu, żeby wyliczyć kolory. Nic nie jest zapisywane ani wysyłane.
+* W *Ambient* każde światło pokazuje **swoją część ekranu**: kilka świateł dzieli pulpit na pasy od lewej do prawej (w kolejności z listy w zakładce *Światła*), a światło ze strefą *Lewa strona*, *Środek*, *Prawa strona*, *Góra* lub *Dół* – tę część. Liczą się kolory, które się wyróżniają; ciemne tło i pasek zadań prawie nie przyciemniają świateł. Uwaga: gry w trybie pełnoekranowym na wyłączność bywają dla Windows niewidoczne (czarny obraz) – wtedy pomaga tryb „okno bez ramki”.
 * W *Synapse → Chroma → Chroma Apps (Aplikacje)* musi być włączona obsługa aplikacji Chroma, a TuyaChroma nie może być tam wyłączony.
 
 ### Co jest przechwytywane

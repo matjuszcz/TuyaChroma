@@ -164,6 +164,43 @@ def is_game_active(frames: dict[str, Frame | None], apps: ChromaApps | None,
     return not full_sync
 
 
+SCREEN_W, SCREEN_H = 48, 27  # the screen sampled for Ambient (16:9)
+
+
+def ambient_color(screen, cfg, index: int, count: int) -> RGB | None:
+    """Ambient: the color of this light's part of the screen.
+
+    Lights split the screen from left to right in list order (3 lights: left,
+    middle, right part); a light set to a zone (left/center/right/top/bottom)
+    shows that part. Colorful areas count more than dark ones (taskbar, black
+    bars), so a light shows what stands out on the screen.
+    """
+    try:
+        pixels = screen(SCREEN_W, SCREEN_H)
+    except Exception:  # noqa: BLE001 - screen capture can fail (locked screen, UAC)
+        return None
+    if not pixels or len(pixels) != SCREEN_W * SCREEN_H:
+        return None
+    zone = cfg.zone if isinstance(cfg.zone, str) else "all"
+    cols, rows = range(SCREEN_W), range(SCREEN_H)
+    third = SCREEN_W // 3
+    if zone == "left":
+        cols = range(0, third)
+    elif zone == "center":
+        cols = range(third, SCREEN_W - third)
+    elif zone == "right":
+        cols = range(SCREEN_W - third, SCREEN_W)
+    elif zone == "top":
+        rows = range(0, SCREEN_H // 2)
+    elif zone == "bottom":
+        rows = range(SCREEN_H // 2, SCREEN_H)
+    elif count > 1:
+        first = index * SCREEN_W // count
+        cols = range(first, max(first + 1, (index + 1) * SCREEN_W // count))
+    part = [pixels[y * SCREEN_W + x] for y in rows for x in cols]
+    return adjust(reduce_colors(part, cfg.mode), cfg.brightness, cfg.min_brightness)
+
+
 def follows_bulb_strip(cfg, profile: Profile) -> bool:
     """Is this light one point of the profile running across all lights?
 
@@ -536,6 +573,10 @@ class SyncService:
             base += interval() / 2 if callable(interval) else 0.0
         t = base + self.latency_offset_ms(worker, settings) / 1000
         renderer = player.renderer
+        if profile.effect == "ambient" and renderer.screen is not None:
+            rgb = ambient_color(renderer.screen, cfg, index, count)
+            if rgb is not None:
+                return rgb
         if follows_bulb_strip(cfg, profile):
             rgb = renderer.frame(f"bulbs@{cfg.id}", max(1, count), 1, t)[min(index, count - 1)]
             return adjust(rgb, cfg.brightness, cfg.min_brightness)
