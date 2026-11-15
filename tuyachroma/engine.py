@@ -47,6 +47,32 @@ def bulb_color(cfg: BulbConfig, frame: Frame, keyboard_area=None) -> RGB:
     return zone_color(cfg, frame.colors, keyboard_area)
 
 
+LINK_LEDS = 5  # Chroma Link: one "LED" per linked device
+
+
+def link_slot(workers: list, worker) -> int | None:
+    """Which Chroma Link LED this light shows (lights on the whole Chroma Link).
+
+    Chroma Link carries one color per linked device; averaging all five mixed
+    them (a dull, identical color on every light). Lights set to it take its
+    LEDs in list order: the 1st light LED 1, the 2nd LED 2, ...
+    """
+    if worker.cfg.source != "chromalink" or worker.cfg.zone != "all":
+        return None
+    linked = [w for w in workers if w.cfg.source == "chromalink" and w.cfg.zone == "all"]
+    try:
+        return linked.index(worker) % LINK_LEDS
+    except ValueError:
+        return None
+
+
+def link_color(cfg: BulbConfig, colors: list[RGB], slot: int) -> RGB:
+    rgb = colors[slot] if slot < len(colors) else colors[0]
+    if max(rgb) < 8 and colors and max(colors[0]) >= 8:
+        rgb = colors[0]  # a game that only sets the first LED: don't go dark
+    return adjust(rgb, cfg.brightness, cfg.min_brightness)
+
+
 def zone_color(cfg: BulbConfig, colors: list[RGB], keyboard_area=None) -> RGB:
     area = keyboard_area if cfg.source == "keyboard" else None
     leds = [colors[i] for i in zone_indices(cfg.source, cfg.zone, area) if i < len(colors)]
@@ -158,7 +184,11 @@ def dispatch(
                          if frames.get(s) is not None and frames[s].active), None)
     for index, worker in enumerate(workers):
         frame = frames.get(worker.cfg.source)
-        if game_active and frame is not None and frame.active:
+        slot = link_slot(workers, worker)
+        if game_active and frame is not None and frame.active and slot is not None:
+            worker.set_color(link_color(worker.cfg, frame.colors, slot))
+            used_game = True
+        elif game_active and frame is not None and frame.active:
             worker.set_color(bulb_color(worker.cfg, frame, keyboard_area))
             used_game = True
         elif game_active and fallback is not None:
@@ -184,6 +214,8 @@ def dispatch(
             if (strip and index < len(strip)
                     and (profile is None or follows_bulb_strip(worker.cfg, profile))):
                 rgb = adjust(strip[index], worker.cfg.brightness, worker.cfg.min_brightness)
+            elif slot is not None and profile_frames.get("chromalink"):
+                rgb = link_color(worker.cfg, profile_frames["chromalink"], slot)
             else:
                 rgb = zone_color(worker.cfg, profile_frames.get(worker.cfg.source, []), keyboard_area)
             worker.set_color(rgb)
@@ -494,6 +526,9 @@ class SyncService:
             return adjust(rgb, cfg.brightness, cfg.min_brightness)
         spec = DEVICES[cfg.source]
         colors = renderer.frame(f"{cfg.source}@{cfg.id}", spec.width, spec.height, t)
+        slot = link_slot(self.workers, worker)
+        if slot is not None:
+            return link_color(cfg, colors, slot)
         return zone_color(cfg, colors, KEYBOARD_AREAS[self.keyboard_layout])
 
     def _bulb_effect_source(self, worker, index: int, count: int, settings, profile, key):
@@ -508,7 +543,8 @@ class SyncService:
         def color() -> RGB:
             return self._bulb_effect_color(worker, index, count, settings, profile)
 
-        return (key, index, count, layout, worker.cfg.min_interval), color
+        slot = link_slot(self.workers, worker)
+        return (key, index, count, layout, worker.cfg.min_interval, slot), color
 
     # ---------------------------------------------------------------- thread
 

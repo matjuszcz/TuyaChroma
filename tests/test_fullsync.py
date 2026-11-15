@@ -686,3 +686,57 @@ def test_light_settings_apply_without_reconnecting() -> None:
         assert service.workers[0] is not worker
     finally:
         service.stop()
+
+
+class _Light:
+    def __init__(self, i, source="chromalink", zone="all"):
+        from tuyachroma.bulbs import BulbConfig
+
+        self.cfg = BulbConfig(name=f"l{i}", id=f"l{i}", ip="1", local_key="k", source=source,
+                              zone=zone, min_brightness=0)
+        self.colors = []
+        self.latency_ms = None
+        self.use_music = True
+
+    def set_color(self, rgb):
+        self.colors.append(rgb)
+
+
+LINK = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (0, 255, 255)]
+
+
+def test_lights_on_chroma_link_get_one_link_led_each() -> None:
+    """All lights on Chroma Link: each shows its own LED, not one mixed color."""
+    lights = [_Light(i) for i in range(5)]
+    frames = {"chromalink": Frame("chromalink", 7, list(LINK), 1)}
+    engine.dispatch(lights, frames, "full", True)
+    assert [lt.colors[-1] for lt in lights] == LINK
+    # a game that sets only the first LED: nobody goes dark
+    only_first = [(200, 0, 50)] + [(0, 0, 0)] * 4
+    engine.dispatch(lights, {"chromalink": Frame("chromalink", 7, only_first, 1)}, "full", True)
+    assert {lt.colors[-1] for lt in lights} == {(200, 0, 50)}
+    # a light on a part of Chroma Link or another device is not counted
+    other = _Light(9, source="keyboard")
+    mixed = [lights[0], other, lights[1]]
+    engine.dispatch(mixed, {**frames, "keyboard": Frame("keyboard", 6, [(9, 9, 9)] * 132, 1)}, "full", True)
+    assert lights[0].colors[-1] == LINK[0] and lights[1].colors[-1] == LINK[1]
+
+
+def test_wave_runs_across_lights_on_chroma_link() -> None:
+    service = engine.SyncService(layout_detector=lambda: "full", own_pid=OWN)
+    renderer = Renderer(Profile(effect="wave", speed=5))
+    service.player = type("P", (), {"renderer": renderer})()
+    lights = [_Light(i) for i in range(5)]
+    service.workers = lights
+    settings = AppConfig().settings
+    settings.latency_mode = "off"
+    real = time.monotonic
+    try:
+        time.monotonic = lambda: 500.0
+        colors = [service._bulb_effect_source(lt, i, 5, settings, renderer.profile, "k")[1]()
+                  for i, lt in enumerate(lights)]
+        expected = Renderer(Profile(effect="wave", speed=5)).frame("chromalink", 5, 1, 500.0)
+    finally:
+        time.monotonic = real
+    assert len(set(colors)) == 5          # a wave, not one mixed color
+    assert colors == expected              # exactly the Chroma Link LEDs (e.g. the ARGB controller)
