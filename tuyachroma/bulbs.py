@@ -27,6 +27,24 @@ STATUS_READY = "gotowa (stan z HA)"
 STATUS_SYNC = "sterowana przez Razer"
 STATUS_UNSUPPORTED = "nieobsługiwana (brak koloru RGB)"
 STATUS_OFFLINE = "wyłączona / poza siecią"
+STATUS_SCENE = "własny efekt listwy (z aplikacji)"
+
+# DPs not replayed from a captured scene: countdown timer, plain color
+SCENE_SKIP_DPS = {"24", "26"}
+
+
+@dataclass(frozen=True)
+class NativeScene:
+    """A light's built-in effect (e.g. a wave along a strip), captured from its state."""
+
+    dps: tuple[tuple[str, Any], ...]
+
+    @classmethod
+    def from_state(cls, dps: dict) -> NativeScene:
+        return cls(tuple(sorted((str(k), v) for k, v in dps.items() if str(k) not in SCENE_SKIP_DPS)))
+
+    def values(self) -> dict[str, Any]:
+        return dict(self.dps)
 
 # tinytuya error codes meaning "nothing answers at this IP" (bulb without power,
 # out of Wi-Fi range, or a new IP address)
@@ -85,6 +103,7 @@ class BulbConfig:
     method: str = "colour"  # colour (reliable) | music (faster, not on every bulb) | auto
     min_interval: float = 0.15
     latency_adjust_ms: int = 0  # extra per-bulb correction for effect timing
+    scene: dict | None = None  # built-in effect to play instead of moving colors
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BulbConfig:
@@ -135,6 +154,9 @@ class BulbWorker(threading.Thread):
         self._send_count = 0
         self._source_key: Any = None
         self.dps: list[str] = []  # data points the bulb reported over the LAN
+        self._scene_sent: NativeScene | None = None
+        self._hold = False
+        self._capture: tuple[threading.Event, dict] | None = None
         self._reported = False
 
     # ------------------------------------------------------------ public API
@@ -145,6 +167,32 @@ class BulbWorker(threading.Thread):
             self._source_key = None
             self._restore_requested = False
         self._wake.set()
+
+    def set_scene(self, scene: NativeScene) -> None:
+        """Play the light's own effect (sent once; the light animates it by itself)."""
+        with self._lock:
+            if self._target == scene:
+                return
+            self._target = scene
+            self._source_key = None
+            self._restore_requested = False
+        self._wake.set()
+
+    def hold(self, on: bool) -> None:
+        """Stop sending anything (the user is setting the light in the Tuya app)."""
+        self._hold = on
+        self._wake.set()
+
+    def read_state(self, timeout: float = 6.0) -> dict | None:
+        """The light's current data points, read over this worker's connection."""
+        done = threading.Event()
+        result: dict = {}
+        self._capture = (done, result)
+        self._wake.set()
+        if not done.wait(timeout):
+            self._capture = None
+            return None
+        return result.get("dps")
 
     def set_color_source(self, source: Callable[[], RGB], key: Any = None) -> None:
         """Follow a moving effect: ``source()`` gives the color for "now".
@@ -287,9 +335,32 @@ class BulbWorker(threading.Thread):
                 target, restore = self._target, self._restore_requested
                 self._restore_requested = False
             now = time.monotonic()
+            if self._capture is not None:
+                done, result = self._capture
+                self._capture = None
+                reply = self._dev.status()
+                if isinstance(reply, dict) and "dps" in reply:
+                    result["dps"] = dict(reply["dps"])
+                done.set()
+                last_contact = now
+                continue
+            if self._hold:
+                if now - last_contact > 8:
+                    check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
+                    last_contact = now
+                continue
             if restore:
                 self._restore()
+                self._scene_sent = None
                 last_contact = now
+                continue
+            if isinstance(target, NativeScene):
+                if self._scene_sent != target:
+                    self._send_scene(target)
+                    last_send = last_contact = time.monotonic()
+                elif now - last_contact > 8:
+                    check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
+                    last_contact = now
                 continue
             if target is None:
                 if now - last_contact > 8:  # keep the persistent socket alive
@@ -326,17 +397,9 @@ class BulbWorker(threading.Thread):
         if max(rgb) == 0:
             r = g = b = 1  # avoid switching off; nearly black
         if not self._in_sync_mode:
-            # Taking over: remember how HA / the Tuya app left the bulb, to give it
-            # back later. Ask the bulb now - tinytuya's cache may be outdated.
-            fresh = dev.status()
-            if fresh and "dps" in fresh and "Error" not in fresh:
-                state = dev.state()
-                if "Error" not in state:
-                    self._original = {
-                        k: state.get(k) for k in RESTORE_KEYS if state.get(k) is not None
-                    }
-            else:
-                _LOGGER.warning("%s: could not read state before takeover: %s", self.cfg.name, fresh)
+            self._remember_original()
+        scene_was_on = self._scene_sent is not None
+        self._scene_sent = None
         if self.use_music:
             if not self._in_sync_mode:
                 dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"})
@@ -344,7 +407,7 @@ class BulbWorker(threading.Thread):
             check_reply(dev.set_music_colour(0, r, g, b), "color")
         else:
             values = {dps["colour"]: tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])}
-            if not self._in_sync_mode:
+            if not self._in_sync_mode or scene_was_on:
                 values[dps["switch"]] = True
                 if dps.get("mode"):
                     values[dps["mode"]] = "colour"
@@ -355,6 +418,36 @@ class BulbWorker(threading.Thread):
         self.status = STATUS_SYNC
         self._sent = rgb
         self._send_count += 1
+
+    def _remember_original(self) -> None:
+        """Taking over: remember how HA / the Tuya app left the bulb, to give it
+        back later. Ask the bulb now - tinytuya's cache may be outdated."""
+        dev = self._dev
+        assert dev is not None
+        fresh = dev.status()
+        if fresh and "dps" in fresh and "Error" not in fresh:
+            state = dev.state()
+            if "Error" not in state:
+                self._original = {
+                    k: state.get(k) for k in RESTORE_KEYS if state.get(k) is not None
+                }
+        else:
+            _LOGGER.warning("%s: could not read state before takeover: %s", self.cfg.name, fresh)
+
+    def _send_scene(self, scene: NativeScene) -> None:
+        dev = self._dev
+        assert dev is not None
+        if not self._in_sync_mode:
+            self._remember_original()
+        values = scene.values()
+        values[dev.dpset["switch"]] = True
+        check_reply(dev.set_multiple_values(values), "effect")
+        self._in_sync_mode = True
+        self._scene_sent = scene
+        self._sent = None
+        self.status = STATUS_SCENE
+        self._send_count += 1
+        _LOGGER.info("%s: playing its own effect %s", self.cfg.name, values)
 
     def _interval(self) -> float:
         return max(self.cfg.min_interval, self.slow_interval)

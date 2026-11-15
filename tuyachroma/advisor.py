@@ -36,8 +36,9 @@ PRODUCT_HINTS = {
     "battletron": (0.3, "Battletron (Action / LSC Smart): przy kolorach częściej niż co ok. 0,2 s "
                         "zaczyna gubić polecenia i potrafi się zawiesić. Ma 20 segmentów, ale każdy "
                         "trzeba ustawiać osobno (ok. 0,25 s na segment, cała listwa ok. 5 s), więc "
-                        "płynna fala wzdłuż listwy nie jest możliwa – program steruje nią jednym "
-                        "kolorem, a w efekcie Wave jest ona jednym punktem fali."),
+                        "program nie zrobi na niej płynnej fali (steruje nią jednym kolorem). Listwa "
+                        "ma za to własną falę: ustaw ją w aplikacji Tuya, a potem w ustawieniach "
+                        "listwy kliknij „Zapamiętaj efekt z aplikacji…”."),
 }
 
 

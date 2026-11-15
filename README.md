@@ -120,6 +120,7 @@ Zakładka **Żarówki**:
 
 * kliknij w kolumnę **✓** przy żarówkach, którymi ma sterować Razer;
 * zaznacz żarówkę, żeby ustawić **źródło koloru**, **strefę** i **jasność**, a potem kliknij **Zapisz**;
+* **Własna fala listwy** (ustawienia żarówki → *Zapamiętaj efekt z aplikacji…*): wiele listew ma wbudowane efekty, np. falę płynącą wzdłuż listwy, której program nie może narysować sam (listwy Tuya przyjmują przez sieć tylko jeden kolor naraz albo ustawiają segmenty bardzo powoli). Ustaw efekt w aplikacji Tuya / Smart Life, kliknij przycisk i *OK* – program odczyta go z listwy i będzie go włączał w profilach **Wave, Spectrum i Koło** (w innych profilach i w grach listwa dalej dostaje zsynchronizowane kolory). Listwa animuje taki efekt sama, więc porusza się w swoim tempie, nie równo z klawiaturą. Włączasz i wyłączasz to polem *Własna fala listwy w Wave/Spectrum/Koło*.
 * **Szybkość zmian**: jak często żarówka dostaje nowy kolor (domyślnie do 7 razy na sekundę). Ustaw *średnio* albo *wolno* dla żarówki, która przy płynnych efektach się zawiesza albo restartuje;
 * **Testuj (mignij)**: żarówka mignie na czerwono, zielono i niebiesko, a potem wróci do poprzedniego stanu;
 * **Szukaj w sieci**: ponownie znajduje adresy IP (np. po zmianie routera).

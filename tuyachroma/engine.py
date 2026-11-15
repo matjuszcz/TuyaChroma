@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Any
 
-from .bulbs import BulbConfig, BulbWorker
+from .bulbs import BulbConfig, BulbWorker, NativeScene
 from .colors import adjust, reduce_colors, zone_indices
 from .config import AppConfig
 from .inputhook import KeyboardHook
@@ -35,6 +35,8 @@ from .screen import ScreenSampler
 SERVICE_CHECK_INTERVAL = 3.0
 KEY_EFFECTS = {"reactive", "ripple"}
 DEVICE_EFFECTS = {"reactive", "ripple", "ambient"}  # bulbs sample a device zone
+# Profiles in which a light with a captured built-in effect plays that instead
+SCENE_EFFECTS = {"wave", "spectrum", "wheel"}
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,6 +94,9 @@ def dispatch(
         if game_active and frame is not None and frame.active:
             worker.set_color(bulb_color(worker.cfg, frame, keyboard_area))
             used_game = True
+        elif (idle in ("full", "effect") and profile is not None and profile.effect in SCENE_EFFECTS
+              and getattr(worker.cfg, "scene", None) and hasattr(worker, "set_scene")):
+            worker.set_scene(NativeScene.from_state(worker.cfg.scene))  # the light animates it
         elif idle in ("full", "effect") and effect_source is not None:
             key, source = effect_source(worker, index, len(workers))
             if hasattr(worker, "set_color_source"):

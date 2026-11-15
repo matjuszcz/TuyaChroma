@@ -829,3 +829,35 @@ def test_auto_tune_button(tmp_path, monkeypatch) -> None:
         assert len(asked) == 2 and "Zastosować" not in asked[1]
     finally:
         app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_capture_scene_from_the_app(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui
+
+    config = AppConfig(devices=[dev("s", enabled=True, name="Led Strip")])
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    held = []
+    worker = SimpleNamespace(cfg=SimpleNamespace(id="s"), connected=True, is_alive=lambda: True,
+                             hold=held.append, read_state=lambda: {"20": True, "21": "scene", "51": "AA"})
+    service.workers = [worker]
+    monkeypatch.setattr(app, "run_bg", lambda func, done=None, error=None: done(func()))
+    monkeypatch.setattr(gui.messagebox, "askokcancel", lambda *a, **kw: True)
+    warnings = []
+    monkeypatch.setattr(gui.messagebox, "showwarning", lambda *a, **kw: warnings.append(a))
+    monkeypatch.setattr(app, "save_and_apply", lambda bulbs_only=False: None)
+    try:
+        app.tree.selection_set("s")
+        app._load_editor()
+        app.capture_scene()
+        assert held == [True, False]  # colors paused while the user used the app
+        assert config.devices[0].scene == {"20": True, "21": "scene", "51": "AA"}
+        assert config.devices[0].use_scene and app.ed_use_scene.get()
+        worker.read_state = lambda: {"20": True, "21": "colour"}  # no effect set in the app
+        app.capture_scene()
+        assert warnings and config.devices[0].scene["21"] == "scene"  # kept the old one
+    finally:
+        service.workers = []
+        app.root.destroy()

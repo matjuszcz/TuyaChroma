@@ -262,6 +262,8 @@ class App:
         self.ed_method = tk.StringVar()
         self.ed_latency = tk.IntVar(value=0)
         self.ed_speed = tk.StringVar(value=SPEED_LABELS[0.15])
+        self.ed_use_scene = tk.BooleanVar(value=False)
+        self.ed_scene_info = tk.StringVar(value="")
         ttk.Checkbutton(self.editor, text="Steruj przez Razer", variable=self.ed_enabled).grid(row=0, column=0, sticky="w")
         ttk.Label(self.editor, text="Źródło koloru:").grid(row=0, column=1, sticky="e", padx=(16, 4))
         ttk.Combobox(self.editor, textvariable=self.ed_source, state="readonly", width=14,
@@ -293,6 +295,12 @@ class App:
         btns.grid(row=5, column=0, columnspan=5, sticky="w", pady=(10, 0))
         ttk.Button(btns, text="Zapisz", command=self.save_editor).pack(side="left")
         ttk.Button(btns, text="Testuj (mignij)", command=self.test_bulb).pack(side="left", padx=8)
+        ttk.Separator(btns, orient="vertical").pack(side="left", fill="y", padx=6)
+        ttk.Checkbutton(btns, variable=self.ed_use_scene,
+                        text="Własna fala listwy w Wave/Spectrum/Koło").pack(side="left")
+        ttk.Button(btns, text="Zapamiętaj efekt z aplikacji…",
+                   command=self.capture_scene).pack(side="left", padx=6)
+        ttk.Label(btns, textvariable=self.ed_scene_info, foreground="#666").pack(side="left")
         self.editor.columnconfigure(5, weight=1)
 
     def _build_account_tab(self) -> None:
@@ -750,6 +758,8 @@ class App:
         self.ed_brightness.set(round(dev.brightness * 100))
         self.ed_method.set(METHOD_LABELS.get(dev.method, METHOD_LABELS["colour"]))
         self.ed_latency.set(int(dev.latency_adjust_ms))
+        self.ed_use_scene.set(dev.use_scene and bool(dev.scene))
+        self.ed_scene_info.set("(zapamiętany)" if dev.scene else "(brak zapamiętanego efektu)")
         speed = min(SPEED_LABELS, key=lambda v: abs(v - dev.min_interval))
         self.ed_speed.set(SPEED_LABELS[speed])
 
@@ -770,11 +780,72 @@ class App:
             dev.latency_adjust_ms = max(-1000, min(1000, int(self.ed_latency.get())))
         except (tk.TclError, ValueError):
             dev.latency_adjust_ms = 0
+        dev.use_scene = self.ed_use_scene.get() and bool(dev.scene)
         dev.min_interval = next((k for k, v in SPEED_LABELS.items() if v == self.ed_speed.get()), 0.15)
         if dev.method not in METHOD_LABELS:
             dev.method = "colour"
         self.refresh_devices()
         self.save_and_apply(bulbs_only=True)
+
+    def capture_scene(self) -> None:
+        """Remember the effect the user set on this light in the Tuya app (e.g. a wave)."""
+        dev = self._selected_device()
+        if dev is None:
+            messagebox.showinfo("TuyaChroma", "Najpierw wybierz listwę z listy.")
+            return
+        if not dev.ip:
+            messagebox.showinfo("TuyaChroma", "Ta listwa nie ma adresu IP – kliknij „Szukaj w sieci”.")
+            return
+        worker = next((w for w in self.service.workers if w.cfg.id == dev.id), None)
+        if worker is not None:
+            worker.hold(True)  # stop sending colors while the user sets the effect
+        try:
+            if not messagebox.askokcancel(
+                    "TuyaChroma – efekt listwy",
+                    f"1. Otwórz aplikację Tuya / Smart Life i ustaw na „{dev.name}” efekt, który ma "
+                    "się włączać w profilach Wave, Spectrum i Koło (np. falę).\n"
+                    "2. Gdy listwa go pokazuje, kliknij OK.\n\n"
+                    "Program na ten czas nie wysyła do niej kolorów."):
+                if worker is not None:
+                    worker.hold(False)
+                return
+        except Exception:
+            if worker is not None:
+                worker.hold(False)
+            raise
+        self.set_busy(f"Odczytuję efekt z „{dev.name}”…")
+
+        def read():
+            if worker is not None and worker.is_alive() and worker.connected:
+                return worker.read_state()
+            from .bulbs import make_device  # noqa: PLC0415
+
+            reply = make_device(dev.bulb_config()).status()
+            return reply.get("dps") if isinstance(reply, dict) else None
+
+        def done(dps) -> None:
+            if worker is not None:
+                worker.hold(False)
+            mode = str((dps or {}).get("21", ""))
+            if not dps or mode in ("", "colour", "white"):
+                self.set_busy("Nie odczytano efektu.")
+                messagebox.showwarning(
+                    "TuyaChroma", f"„{dev.name}” nie pokazuje teraz własnego efektu (tryb: {mode or '?'}). "
+                    "Ustaw efekt w aplikacji Tuya i spróbuj jeszcze raz.")
+                return
+            dev.scene = {str(k): v for k, v in dps.items()}
+            dev.use_scene = True
+            _LOGGER.info("%s: captured its own effect %s", dev.name, dev.scene)
+            self._load_editor()
+            self.set_busy(f"Zapamiętano efekt „{dev.name}” (tryb {mode}).")
+            self.save_and_apply(bulbs_only=True)
+
+        def failed(err: Exception) -> None:
+            if worker is not None:
+                worker.hold(False)
+            self.set_busy(f"Nie udało się odczytać efektu: {err}")
+
+        self.run_bg(read, done, failed)
 
     def scan_lan(self) -> None:
         if not self.config.devices:

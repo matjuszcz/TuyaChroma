@@ -49,6 +49,10 @@ class Device:
     method: str = "colour"
     min_interval: float = 0.15
     latency_adjust_ms: int = 0  # per-bulb correction for effect timing (ms)
+    # The light's own effect captured from the Tuya app (e.g. a wave along a
+    # strip), played in Wave/Spectrum/Wheel profiles when use_scene is on.
+    scene: dict[str, Any] = field(default_factory=dict)
+    use_scene: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Device:
@@ -62,6 +66,7 @@ class Device:
             mode=self.mode, brightness=self.brightness, min_brightness=self.min_brightness,
             method=self.method, min_interval=self.min_interval,
             latency_adjust_ms=int(self.latency_adjust_ms),
+            scene=dict(self.scene) if (self.use_scene and self.scene) else None,
         )
 
     @property
