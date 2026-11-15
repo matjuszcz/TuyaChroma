@@ -145,6 +145,8 @@ Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life 
 
 Żeby to działało, program pamięta logowanie do konta Tuya. Jest ono zapisane **zaszyfrowane** (Windows DPAPI, odczyta je tylko Twoje konto Windows). *Konto Tuya → Wyloguj* usuwa zapisane logowanie. Żarówki i ich klucze zostają, a program dalej nimi steruje.
 
+**Logowanie nie wygasa samo:** dopóki program działa, co 30 minut odnawia logowanie w tle (tak jak integracja Tuya w Home Assistant) i od razu zapisuje nowe klucze od Tuya. Sterowanie światłami w ogóle nie potrzebuje konta – działa lokalnie w sieci domowej; konto jest potrzebne tylko do pobrania listy świateł i ich kluczy (*Odśwież z konta*, *Dobierz ustawienia*). Ponowne logowanie kodem QR może być potrzebne tylko wtedy, gdy program długo nie był uruchamiany, albo gdy wylogujesz program w aplikacji Tuya – program wtedy o tym napisze.
+
 ### 5. Ustawienia
 
 * **Uruchamiaj razem z Windows** (domyślnie włączone): program startuje po zalogowaniu do Windows od razu w zasobniku, bez otwierania okna, i przejmuje wybrane żarówki, gdy gra wyśle efekt. Wpis autostartu znajdziesz też w *Menedżer zadań → Aplikacje autostartu* jako „TuyaChroma”.

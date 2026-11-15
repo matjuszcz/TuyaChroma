@@ -9,8 +9,10 @@ read device names and local keys; bulbs are then controlled locally.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import logging
+import time
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
@@ -124,24 +126,75 @@ class TuyaAccount:
 EXPIRED_MARKERS = ("token is expired", "sign invalid", "(1010)", "token invalid")
 
 
-def fetch_with_session(session: dict[str, Any]) -> tuple[list[CloudDevice], dict[str, Any]]:
-    """List the account's devices with a saved login (refreshes the token if needed).
-
-    Returns the devices and the (possibly updated) session to save.
-    Raises TuyaCloudError if the login expired and a new QR login is needed.
-    """
-    from tuya_sharing import Manager, SharingTokenListener  # noqa: PLC0415
-
-    updated = dict(session)
+def _token_listener(updated: dict[str, Any], on_token: Callable[[dict[str, Any]], None] | None):
+    from tuya_sharing import SharingTokenListener  # noqa: PLC0415
 
     class Listener(SharingTokenListener):
         def update_token(self, token_info: dict[str, Any]) -> None:
+            # Tuya hands out a NEW refresh token with every refresh and the old one
+            # stops working: save it at once, even if what follows fails (losing it
+            # was the "sign invalid" / expired login of the 1.9.19 log).
             updated["token_info"] = dict(token_info)
+            if on_token is not None:
+                on_token(dict(updated))
+
+    return Listener()
+
+
+def keep_session_alive(session: dict[str, Any],
+                       on_token: Callable[[dict[str, Any]], None] | None = None) -> bool | None:
+    """Renew the saved login when its access token (valid ~2 h) runs out.
+
+    Run regularly while the program runs (like Home Assistant's Tuya
+    integration does), so the chain of refresh tokens never lapses.
+    Returns True (valid), False (Tuya refused it: a new QR login is needed) or
+    None (no answer, e.g. no internet - try again later, nothing is lost).
+    """
+    from tuya_sharing.customerapi import CustomerApi, CustomerTokenInfo  # noqa: PLC0415
+
+    try:
+        token = CustomerTokenInfo(session["token_info"])
+        api = CustomerApi(token, TUYA_CLIENT_ID, session["user_code"], session["endpoint"], None)
+    except KeyError:
+        return False
+    if token.expire_time - 5 * 60 * 1000 > time.time() * 1000:
+        return True  # still valid for a while
+    # Renew here instead of the SDK's refresh_access_token_if_need(), which
+    # swallows errors: "no internet" must not look like "login expired".
+    api.refresh_token = True  # the SDK's own guard: don't let get() refresh by itself
+    try:
+        response = api.get("/v1.0/m/token/" + token.refresh_token)
+    except Exception as err:  # noqa: BLE001 - network trouble
+        _LOGGER.info("Tuya login renewal: no answer (%s), will retry", err)
+        return None
+    if not isinstance(response, dict) or not response.get("success"):
+        _LOGGER.warning("Tuya login renewal refused: %s", response)
+        return False
+    result = response.get("result", {})
+    _token_listener(dict(session), on_token).update_token({
+        "t": response["t"], "expire_time": result["expireTime"], "uid": result["uid"],
+        "access_token": result["accessToken"], "refresh_token": result["refreshToken"],
+    })
+    return True
+
+
+def fetch_with_session(session: dict[str, Any],
+                       on_token: Callable[[dict[str, Any]], None] | None = None,
+                       ) -> tuple[list[CloudDevice], dict[str, Any]]:
+    """List the account's devices with a saved login (refreshes the token if needed).
+
+    Returns the devices and the (possibly updated) session to save; a refreshed
+    login is also passed to ``on_token`` right away. Raises TuyaCloudError if
+    the login expired and a new QR login is needed.
+    """
+    from tuya_sharing import Manager  # noqa: PLC0415
+
+    updated = dict(session)
 
     try:
         manager = Manager(
             TUYA_CLIENT_ID, session["user_code"], session["terminal_id"], session["endpoint"],
-            session["token_info"], Listener(),
+            session["token_info"], _token_listener(updated, on_token),
         )
         manager.update_device_cache()
     except KeyError as err:

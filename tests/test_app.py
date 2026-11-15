@@ -609,7 +609,7 @@ def test_gui_razer_devices_and_account_refresh(tmp_path, monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(razer_devices, "detect", lambda: calls.append(1) or list(detected))
     monkeypatch.setattr(gui, "scan", lambda _s: {"n1": {"id": "n1", "ip": "10.0.0.7", "version": "3.5"}})
-    monkeypatch.setattr(cloud, "fetch_with_session", lambda s: (
+    monkeypatch.setattr(cloud, "fetch_with_session", lambda s, on_token=None: (
         [CloudDevice("n1", "New strip", "k" * 16, "dd", "", rgb=True)], {**s, "refreshed": True}))
     service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
     config = AppConfig(devices=[dev("old")], tuya_session={"user_code": "C"})
@@ -1029,3 +1029,108 @@ def test_expired_login_asks_for_a_new_qr_login(monkeypatch) -> None:
     session = {"user_code": "u", "terminal_id": "t", "endpoint": "e", "token_info": {}}
     with pytest.raises(cloud.TuyaCloudError, match="zaloguj się ponownie kodem QR"):
         cloud.fetch_with_session(session)
+
+
+def test_renewed_login_is_saved_even_if_the_fetch_fails(monkeypatch) -> None:
+    """Tuya replaces the refresh token on every renewal: losing the new one made the
+    next try fail with 'sign invalid' (1.9.19 log)."""
+    import sys as _sys
+    import types
+
+    from tuyachroma import cloud
+
+    class Manager:
+        def __init__(self, client, user_code, terminal, endpoint, token_info, listener):
+            self.listener = listener
+
+        def update_device_cache(self):
+            self.listener.update_token({"t": 1, "expire_time": 7200, "uid": "u",
+                                        "access_token": "new-access", "refresh_token": "new-refresh"})
+            raise RuntimeError("network error: timeout")  # fails after the renewal
+
+    monkeypatch.setitem(_sys.modules, "tuya_sharing", types.SimpleNamespace(
+        Manager=Manager, SharingTokenListener=object))
+    saved = []
+    session = {"user_code": "u", "terminal_id": "t", "endpoint": "e",
+               "token_info": {"refresh_token": "old-refresh"}}
+    with pytest.raises(cloud.TuyaCloudError):
+        cloud.fetch_with_session(session, saved.append)
+    assert saved and saved[-1]["token_info"]["refresh_token"] == "new-refresh"
+
+
+def test_login_is_kept_alive(monkeypatch) -> None:
+    from tuya_sharing import customerapi
+
+    from tuyachroma import cloud
+
+    now_ms = int(time.time() * 1000)
+    expired = {"t": now_ms - 3 * 3600 * 1000, "expire_time": 7200, "uid": "u",
+               "access_token": "a", "refresh_token": "r1"}
+    session = {"user_code": "u", "terminal_id": "t", "endpoint": "https://example.invalid",
+               "token_info": expired}
+    answers = {"r1": {"success": True, "t": now_ms, "result": {
+        "expireTime": 7200, "uid": "u", "accessToken": "a2", "refreshToken": "r2"}}}
+    monkeypatch.setattr(customerapi.CustomerApi, "get",
+                        lambda self, path, params=None: answers.get(path.rsplit("/", 1)[-1],
+                                                                    {"success": False}))
+    saved = []
+    assert cloud.keep_session_alive(session, saved.append) is True
+    assert saved[-1]["token_info"]["refresh_token"] == "r2"  # the new token, saved at once
+    stale = dict(session, token_info=dict(expired, refresh_token="gone"))
+    assert cloud.keep_session_alive(stale, saved.append) is False  # Tuya refused: new QR login needed
+    fresh = dict(session, token_info=dict(expired, t=now_ms))
+    n = len(saved)
+    assert cloud.keep_session_alive(fresh, saved.append) is True and len(saved) == n  # nothing to do
+
+    def offline(self, path, params=None):
+        raise ConnectionError("no internet")
+
+    monkeypatch.setattr(customerapi.CustomerApi, "get", offline)
+    assert cloud.keep_session_alive(session, saved.append) is None  # unknown, not "expired"
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_gui_saves_a_renewed_login_and_warns_when_expired(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import cloud, gui
+
+    config = AppConfig(devices=[dev("a")], tuya_session={"user_code": "u", "token_info": {"refresh_token": "r1"}})
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    monkeypatch.setattr(app, "run_bg", lambda func, done=None, error=None: done(func()))
+    try:
+        def renew(session, on_token):
+            on_token({**session, "token_info": {"refresh_token": "r2"}})
+            return True
+
+        monkeypatch.setattr(cloud, "keep_session_alive", renew)
+        app._keep_login_alive()
+        deadline = time.time() + 3
+        while time.time() < deadline and config.tuya_session["token_info"]["refresh_token"] != "r2":
+            app.root.update()
+            time.sleep(0.02)
+        assert config.tuya_session["token_info"]["refresh_token"] == "r2"
+        assert load(cfgmod.default_path()).tuya_session["token_info"]["refresh_token"] == "r2"
+        monkeypatch.setattr(cloud, "keep_session_alive", lambda s, cb: False)
+        app._keep_login_alive()
+        assert "kodem QR" in app.busy_var.get()
+    finally:
+        app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_no_internet_is_not_an_expired_login(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import cloud, gui
+
+    config = AppConfig(devices=[dev("a")], tuya_session={"user_code": "u", "token_info": {}})
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    monkeypatch.setattr(app, "run_bg", lambda func, done=None, error=None: done(func()))
+    monkeypatch.setattr(cloud, "keep_session_alive", lambda s, cb: None)
+    try:
+        app.set_busy("")
+        app._keep_login_alive()
+        assert "QR" not in app.busy_var.get() and config.tuya_session  # nothing alarming, login kept
+    finally:
+        app.root.destroy()

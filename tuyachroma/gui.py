@@ -143,6 +143,8 @@ class App:
         self._rescanning = False
         self._rescan_every = self.RESCAN_EVERY
         self.root.after(30_000, self._watch_unreachable)
+        self._login_warned = False
+        self.root.after(15_000, self._keep_login_alive)
         self.root.after(90_000, self._log_device_report)
 
     # ----------------------------------------------------------- utilities
@@ -1249,7 +1251,7 @@ class App:
                 return None
             from .cloud import fetch_with_session  # noqa: PLC0415
 
-            return fetch_with_session(self.config.tuya_session)
+            return fetch_with_session(self.config.tuya_session, self._token_refreshed)
 
         def done(result) -> None:
             if result is not None:
@@ -1306,6 +1308,42 @@ class App:
         else:
             messagebox.showinfo("TuyaChroma – dobór ustawień", text)
 
+    # ------------------------------------------------------- Tuya login
+
+    LOGIN_CHECK_EVERY = 30 * 60 * 1000  # ms
+
+    def _token_refreshed(self, session: dict) -> None:
+        """Tuya renewed the login (from a worker thread): save the new tokens now."""
+        def apply() -> None:
+            if self.config.tuya_session:
+                self.config.tuya_session = session
+                save(self.config)
+                _LOGGER.info("Tuya login renewed")
+        self._queue.put(apply)
+
+    def _keep_login_alive(self) -> None:
+        """Renew the saved Tuya login regularly, so it doesn't expire."""
+        if self._quitting:
+            return
+        self.root.after(self.LOGIN_CHECK_EVERY, self._keep_login_alive)
+        if not self.config.tuya_session:
+            return
+        from .cloud import keep_session_alive  # noqa: PLC0415
+
+        def done(ok: bool | None) -> None:
+            if ok is None:
+                return  # no answer (no internet?): try again next time
+            if not ok and not self._login_warned:
+                self._login_warned = True
+                _LOGGER.warning("Tuya login expired - a new QR login is needed")
+                self.set_busy("Logowanie do konta Tuya wygasło – zaloguj się ponownie kodem QR "
+                              "(zakładka „Konto Tuya”). Sterowanie światłami działa dalej.")
+            elif ok:
+                self._login_warned = False
+
+        self.run_bg(lambda: keep_session_alive(self.config.tuya_session, self._token_refreshed),
+                    done, lambda _err: None)
+
     def refresh_from_account(self) -> None:
         if not self.config.tuya_session:
             messagebox.showinfo("TuyaChroma", "Zaloguj się w zakładce „Konto Tuya” (kod QR). "
@@ -1317,7 +1355,7 @@ class App:
         def fetch():
             from .cloud import fetch_with_session  # noqa: PLC0415
 
-            return fetch_with_session(self.config.tuya_session)
+            return fetch_with_session(self.config.tuya_session, self._token_refreshed)
 
         def done(result) -> None:
             devices, session = result
