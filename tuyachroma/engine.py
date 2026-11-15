@@ -350,6 +350,19 @@ class SyncService:
     def bulb_statuses(self) -> dict[str, str]:
         return {w.cfg.id: w.status for w in self.workers}
 
+    def bulb_details(self) -> dict[str, dict]:
+        """What each running bulb reported and how it behaves (for the settings advisor)."""
+        from .bulbs import learned_slow_interval  # noqa: PLC0415
+
+        return {w.cfg.id: {
+            "status": w.status,
+            "connected": getattr(w, "connected", False),
+            "latency_ms": getattr(w, "latency_ms", None),
+            "dps": list(getattr(w, "dps", [])),
+            "bulb_type": getattr(getattr(w, "_dev", None), "bulb_type", ""),
+            "dropped_off": learned_slow_interval(w.cfg.id),
+        } for w in self.workers}
+
     def bulb_latencies(self) -> dict[str, float | None]:
         """Measured delay per bulb (ms): color sent -> bulb confirmed."""
         return {w.cfg.id: getattr(w, "latency_ms", None) for w in self.workers}

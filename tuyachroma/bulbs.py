@@ -41,6 +41,11 @@ SLOW_RECOVER = 30.0   # after this long without problems, try sending faster aga
 # Bulbs that dropped off Wi-Fi while getting colors (cheap ones reboot when
 # flooded): they keep the slower rate until the program is restarted.
 _learned_slow: dict[str, float] = {}
+
+
+def learned_slow_interval(dev_id: str) -> float:
+    """> 0 if the bulb dropped off Wi-Fi while getting colors in this session."""
+    return _learned_slow.get(dev_id, 0.0)
 RETRY_MAX = 15.0  # seconds between connection attempts to an unreachable bulb
 
 
@@ -129,6 +134,7 @@ class BulbWorker(threading.Thread):
         self._last_problem = 0.0
         self._send_count = 0
         self._source_key: Any = None
+        self.dps: list[str] = []  # data points the bulb reported over the LAN
 
     # ------------------------------------------------------------ public API
 
@@ -236,6 +242,7 @@ class BulbWorker(threading.Thread):
             dev.close()
             raise UnsupportedBulb("device is not a color (RGB) bulb")
         self._dev = dev
+        self.dps = sorted((str(k) for k in status["dps"]), key=lambda k: (len(k), k))
         method = self.cfg.method
         self.use_music = bool(dev.dpset.get("music")) and method in ("auto", "music")
         if method == "music" and not dev.dpset.get("music"):
@@ -245,8 +252,8 @@ class BulbWorker(threading.Thread):
         self.connected = True
         self.status = STATUS_SYNC if self._in_sync_mode else STATUS_READY
         _LOGGER.info(
-            "%s: connected (type %s, %s mode)", self.cfg.name, dev.bulb_type,
-            "music" if self.use_music else "colour",
+            "%s: connected (type %s, %s mode, DPs %s)", self.cfg.name, dev.bulb_type,
+            "music" if self.use_music else "colour", ",".join(self.dps),
         )
 
     def _disconnect(self) -> None:

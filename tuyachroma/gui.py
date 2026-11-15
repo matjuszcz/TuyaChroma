@@ -125,6 +125,7 @@ class App:
         self._rescanning = False
         self._rescan_every = self.RESCAN_EVERY
         self.root.after(30_000, self._watch_unreachable)
+        self.root.after(90_000, self._log_device_report)
 
     # ----------------------------------------------------------- utilities
 
@@ -229,11 +230,13 @@ class App:
         tab = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(tab, text="Żarówki")
 
+        ttk.Label(tab, text="Światła RGB z Twojego konta. Zaznacz te, którymi ma sterować Razer (kolumna ✓)."
+                  ).pack(anchor="w", pady=(0, 4))
         bar = ttk.Frame(tab)
         bar.pack(fill="x", pady=(0, 6))
-        ttk.Label(bar, text="Światła RGB z Twojego konta. Zaznacz te, którymi ma sterować Razer (kolumna ✓).").pack(side="left")
-        ttk.Button(bar, text="Szukaj w sieci", command=self.scan_lan).pack(side="right")
-        ttk.Button(bar, text="Odśwież z konta", command=self.refresh_from_account).pack(side="right", padx=6)
+        ttk.Button(bar, text="Odśwież z konta", command=self.refresh_from_account).pack(side="left")
+        ttk.Button(bar, text="Szukaj w sieci", command=self.scan_lan).pack(side="left", padx=6)
+        ttk.Button(bar, text="Dobierz ustawienia automatycznie", command=self.auto_tune).pack(side="left")
 
         cols = ("on", "name", "ip", "version", "source", "zone", "latency", "status")
         self.tree = ttk.Treeview(tab, columns=cols, show="headings", height=10, selectmode="browse")
@@ -1054,6 +1057,73 @@ class App:
         self.run_bg(devices_db.update, done, failed)
 
     # -------------------------------------------------------------- account
+
+    def auto_tune(self) -> None:
+        """Check what each bulb is and how it behaves; propose the best settings."""
+        if not self.config.devices:
+            messagebox.showinfo("TuyaChroma", "Najpierw zaloguj się w zakładce „Konto Tuya”.")
+            return
+        self.set_busy("Sprawdzam urządzenia…")
+
+        def fetch():
+            # Fresh data points from the account (what each device supports).
+            if not self.config.tuya_session:
+                return None
+            from .cloud import fetch_with_session  # noqa: PLC0415
+
+            return fetch_with_session(self.config.tuya_session)
+
+        def done(result) -> None:
+            if result is not None:
+                devices, session = result
+                self.config.tuya_session = session
+                self.config.merge_cloud(devices)
+                save(self.config)
+                self.refresh_devices()
+            self._show_advice()
+
+        def failed(err: Exception) -> None:
+            _LOGGER.warning("Auto settings: account data unavailable: %s", err)
+            self._show_advice()
+
+        self.run_bg(fetch, done, failed)
+
+    def _log_device_report(self) -> None:
+        """Once after start: write what each bulb is and supports to the log (no changes)."""
+        if self._quitting or not self.config.devices:
+            return
+        try:
+            from . import advisor  # noqa: PLC0415
+
+            advisor.advise(self.config.devices, self.service.bulb_details(), self.config.settings)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Device report failed")
+
+    def _show_advice(self) -> None:
+        from . import advisor  # noqa: PLC0415
+
+        advice = advisor.advise(self.config.devices, self.service.bulb_details(), self.config.settings)
+        lines = []
+        if advice.changes:
+            lines.append("Proponowane zmiany:")
+            lines += [f"• {c.describe()}" for c in advice.changes]
+        if advice.notes:
+            lines.append("")
+            lines.append("Warto wiedzieć:")
+            lines += [f"• {n}" for n in advice.notes]
+        if not lines:
+            lines = ["Wszystkie żarówki mają już najlepsze ustawienia."]
+        text = "\n".join(lines)
+        self.set_busy("Sprawdzono urządzenia (szczegóły w logu: „Device report”).")
+        if advice.changes:
+            if messagebox.askyesno("TuyaChroma – dobór ustawień", text + "\n\nZastosować zmiany?"):
+                n = advisor.apply(self.config.devices, advice.changes)
+                _LOGGER.info("Auto settings: applied %d change(s)", n)
+                self.refresh_devices()
+                self.save_and_apply(bulbs_only=True)
+                self.set_busy(f"Zastosowano {n} zmian(y).")
+        else:
+            messagebox.showinfo("TuyaChroma – dobór ustawień", text)
 
     def refresh_from_account(self) -> None:
         if not self.config.tuya_session:

@@ -37,6 +37,7 @@ class Device:
     local_key: str
     category: str = ""
     product_name: str = ""
+    codes: list[str] = field(default_factory=list)  # data points from the Tuya account
     ip: str = ""
     version: str = ""
     enabled: bool = False  # controlled by Razer?
@@ -128,11 +129,13 @@ class AppConfig:
                 self.devices.append(Device(
                     id=cd.id, name=cd.name, local_key=cd.local_key,
                     category=cd.category, product_name=cd.product_name,
+                    codes=list(getattr(cd, "codes", ())),
                 ))
                 new += 1
             else:
                 dev.name, dev.local_key = cd.name, cd.local_key
                 dev.category, dev.product_name = cd.category, cd.product_name
+                dev.codes = list(getattr(cd, "codes", ()))
         return new
 
     def apply_scan(self, found: dict[str, dict]) -> int:

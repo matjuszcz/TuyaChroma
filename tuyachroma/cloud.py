@@ -41,6 +41,7 @@ class CloudDevice:
     category: str
     product_name: str
     rgb: bool = False
+    codes: tuple[str, ...] = ()  # the device's data points ("colour_data", "music_data", ...)
 
     @property
     def is_light(self) -> bool:
@@ -64,6 +65,7 @@ def _device(customer: Any) -> CloudDevice | None:
         category=category,
         product_name=getattr(customer, "product_name", "") or "",
         rgb=rgb and category in LIGHT_CATEGORIES,
+        codes=tuple(sorted(str(c) for c in codes)),
     )
 
 

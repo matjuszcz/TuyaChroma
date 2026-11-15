@@ -803,3 +803,29 @@ def test_unreachable_bulbs_found_under_new_ip(tmp_path, monkeypatch) -> None:
         assert scans == [10, 10, 10]
     finally:
         app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_auto_tune_button(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import bulbs, gui
+
+    config = AppConfig(devices=[dev("a", enabled=True, name="Lampka Biurko")])
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    monkeypatch.setattr(service, "bulb_details", lambda: {"a": {
+        "status": bulbs.STATUS_SYNC, "latency_ms": 90, "dps": ["20", "24"], "dropped_off": 0.3}})
+    monkeypatch.setattr(app, "run_bg", lambda func, done=None, error=None: done(func()))
+    asked = []
+    monkeypatch.setattr(gui.messagebox, "askyesno", lambda title, text, **kw: asked.append(text) or True)
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda title, text, **kw: asked.append(text))
+    applied = []
+    monkeypatch.setattr(app, "save_and_apply", lambda bulbs_only=False: applied.append(bulbs_only))
+    try:
+        app.auto_tune()
+        assert "Lampka Biurko" in asked[0] and "wolno" in asked[0]
+        assert config.devices[0].min_interval == 0.5 and applied == [True]
+        app.auto_tune()  # nothing left to change: just information
+        assert len(asked) == 2 and "Zastosować" not in asked[1]
+    finally:
+        app.root.destroy()

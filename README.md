@@ -123,6 +123,7 @@ Zakładka **Żarówki**:
 * **Szybkość zmian**: jak często żarówka dostaje nowy kolor (domyślnie do 7 razy na sekundę). Ustaw *średnio* albo *wolno* dla żarówki, która przy płynnych efektach się zawiesza albo restartuje;
 * **Testuj (mignij)**: żarówka mignie na czerwono, zielono i niebiesko, a potem wróci do poprzedniego stanu;
 * **Szukaj w sieci**: ponownie znajduje adresy IP (np. po zmianie routera).
+* **Dobierz ustawienia automatycznie**: program pobiera z konta Tuya listę funkcji każdego urządzenia, sprawdza, co żarówki zgłaszają w sieci i jak się zachowują (opóźnienie, znikanie z sieci w trakcie efektów), i proponuje najlepsze ustawienia, np. wolniejszą *Szybkość zmian* dla żarówki, która się restartuje, albo wyłączenie żarówki tylko z białym światłem. Zmiany stosuje dopiero po potwierdzeniu. Pokazuje też informacje, np. czy listwa ma osobno sterowane diody (RGBIC) i czy żarówka obsługuje tryb Music. Półtorej minuty po każdym starcie program zapisuje ten raport w logu (wpisy „Device report”), bez zmieniania czegokolwiek.
 
 Wskazówki:
 * **Chroma Link** to kanał, który wiele gier ustawia specjalnie dla oświetlenia otoczenia.
