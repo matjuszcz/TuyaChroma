@@ -213,6 +213,20 @@ class BulbWorker(threading.Thread):
             self._restore_requested = False
         self._wake.set()
 
+    # Settings that need a new connection; everything else applies on the fly.
+    CONNECTION_FIELDS = ("id", "ip", "local_key", "version", "method")
+
+    def needs_reconnect(self, cfg: BulbConfig) -> bool:
+        return any(getattr(cfg, f) != getattr(self.cfg, f) for f in self.CONNECTION_FIELDS)
+
+    def update_config(self, cfg: BulbConfig) -> None:
+        """New source, zone, brightness, rate, ...: no reconnect, no flash of the HA state."""
+        with self._lock:
+            self.cfg = cfg
+            self._source_key = None  # recompute the effect color with the new settings
+            self._sent = None        # and send it even if it looks the same
+        self._wake.set()
+
     def set_scene(self, scene: NativeScene) -> None:
         """Play the light's own effect (sent once; the light animates it by itself)."""
         with self._lock:

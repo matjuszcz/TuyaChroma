@@ -373,6 +373,10 @@ class SyncService:
                 wanted = next((c for c in configs if c.id == bulb_id), None)
                 if wanted is not None and wanted == worker.cfg:
                     keep[bulb_id] = worker
+                elif (wanted is not None and hasattr(worker, "update_config")
+                      and not worker.needs_reconnect(wanted)):
+                    worker.update_config(wanted)  # applied live: the light stays taken over
+                    keep[bulb_id] = worker
                 else:
                     worker.request_stop()  # removed or changed: give it back first
                     self._retiring.append(worker)

@@ -648,3 +648,41 @@ def test_light_on_another_device_follows_the_game(monkeypatch) -> None:
         assert service._sources == ["keyboard", "mouse"]  # the keyboard is read for that
     finally:
         service.stop()
+
+
+def test_light_settings_apply_without_reconnecting() -> None:
+    """1.9.10 log: each source change gave the light back to HA for ~3 s and reconnected."""
+    from tuyachroma.bulbs import BulbWorker
+    from test_bulbs import FakeBulb
+
+    bulbs_made = []
+
+    def factory(cfg):
+        bulbs_made.append(FakeBulb(music=False))
+        return BulbWorker(cfg, device_factory=lambda _c, b=bulbs_made[-1]: b)
+
+    dll = FakeDll()
+    service = _service(dll, factory)
+    config = AppConfig(devices=[_dev("a")])
+    config.settings.idle = "full"
+    service.start(config)
+    try:
+        deadline = time.time() + 3
+        while time.time() < deadline and not (bulbs_made and bulbs_made[0].sent):
+            time.sleep(0.01)
+        worker = service.workers[0]
+        for change in (dict(source="chromalink"), dict(zone="left", brightness=0.5),
+                       dict(min_interval=0.3, latency_adjust_ms=100)):
+            for k, v in change.items():
+                setattr(config.device("a"), k, v)
+            assert service.update_bulbs(config)
+            assert service.workers[0] is worker  # same connection
+            for k, v in change.items():
+                assert getattr(worker.cfg, k) == v  # applied
+        assert len(bulbs_made) == 1  # never reconnected
+        assert all(v.get("21") != "white" for _k, v in bulbs_made[0].sent)  # never given back
+        config.device("a").ip = "1.1.1.2"  # a new IP does need a new connection
+        assert service.update_bulbs(config)
+        assert service.workers[0] is not worker
+    finally:
+        service.stop()

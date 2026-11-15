@@ -964,3 +964,27 @@ def test_editor_does_not_undo_changes_made_elsewhere(tmp_path, monkeypatch) -> N
         assert d.brightness == 0.5 and d.ip == "192.168.0.99"
     finally:
         app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_saving_settings_restarts_only_when_needed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui
+
+    config = AppConfig(devices=[dev("a", enabled=True)])
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    applied = []
+    monkeypatch.setattr(app, "save_and_apply", lambda bulbs_only=False: applied.append(bulbs_only))
+    monkeypatch.setattr(gui.winsys, "set_autostart", lambda *a: None)
+    try:
+        app.set_latency_mode.set("manual")   # read live by the running sync
+        app.set_effect_sync.set("ticks")
+        app.save_settings()
+        assert applied == [] and config.settings.latency_mode == "manual"
+        assert load(cfgmod.default_path()).settings.effect_sync == "ticks"  # saved
+        app.set_idle.set("full")             # needs the sync to start again
+        app.save_settings()
+        assert applied == [False]
+    finally:
+        app.root.destroy()

@@ -1408,8 +1408,13 @@ class App:
 
     # ------------------------------------------------------------- settings
 
+    # Settings the running sync only reads when it starts; all others (delay
+    # compensation, sync mode, updates, ...) are read live from the same object.
+    RESTART_SETTINGS = ("idle", "fps", "bulb_effect_rate", "keyboard_layout")
+
     def save_settings(self) -> None:
         s = self.config.settings
+        before = {k: getattr(s, k) for k in self.RESTART_SETTINGS}
         s.autostart = self.set_autostart.get()
         s.start_minimized = self.set_minimized.get()
         s.idle = self.set_idle.get()
@@ -1435,7 +1440,10 @@ class App:
             winsys.set_autostart(s.autostart, s.start_minimized)
         except OSError as err:
             messagebox.showwarning("TuyaChroma", f"Nie udało się ustawić autostartu: {err}")
-        self.save_and_apply()
+        if {k: getattr(s, k) for k in self.RESTART_SETTINGS} != before:
+            self.save_and_apply()  # the sync must start again with these
+        else:
+            save(self.config)       # applied live: no restart, the lights stay in sync
         self.set_busy("Zapisano ustawienia.")
 
     def open_logs(self) -> None:
