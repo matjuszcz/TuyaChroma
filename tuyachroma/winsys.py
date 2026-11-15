@@ -179,3 +179,30 @@ def start_system_event_listener(
     thread = threading.Thread(target=run, name="win-events", daemon=True)
     thread.start()
     return thread
+
+
+def process_alive(pid: int) -> bool:
+    """Is a process with this PID running? (Chroma's app list can keep old entries.)"""
+    if pid <= 0:
+        return False
+    if sys.platform != "win32":
+        import os  # noqa: PLC0415
+
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+    k32 = ctypes.windll.kernel32
+    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    try:
+        code = ctypes.c_ulong()
+        if not k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == 259  # STILL_ACTIVE
+    finally:
+        k32.CloseHandle(handle)

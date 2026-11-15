@@ -36,6 +36,9 @@ class EffectPlayer(threading.Thread):
         self._strip: list[RGB] = []
         self._output = None
         self.paused = False
+        # A game runs: let go of the Chroma SDK so the game gets the Razer devices
+        # (otherwise Synapse may keep showing our effect instead of the game's).
+        self.yielded = False
         self.output_status = "—" if output_factory is None else "łączenie z Chroma SDK…"
 
     def latest(self) -> tuple[dict[str, list[RGB]], list[RGB]]:
@@ -56,7 +59,13 @@ class EffectPlayer(threading.Thread):
                 strip = self.renderer.strip(self.bulb_count, t)
                 with self._lock:
                     self._frames, self._strip = frames, strip
-                if self._factory is not None:
+                if self._factory is not None and self.yielded:
+                    if self._output is not None:
+                        self._output.close()
+                        self._output = None
+                        _LOGGER.info("Razer devices handed over to the game")
+                    self.output_status = "urządzenia Razer: steruje gra"
+                elif self._factory is not None:
                     if self._output is None and started >= next_try:
                         try:
                             self._output = self._factory()

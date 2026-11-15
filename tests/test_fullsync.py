@@ -446,3 +446,74 @@ def test_new_connection_waits_for_old_one() -> None:
         assert second_start >= stopped  # reconnects only after the old connection closed
     finally:
         service.stop()
+
+
+def test_other_chroma_apps() -> None:
+    apps = ChromaApps(current_pid=OWN, apps={OWN: "TuyaChroma.exe", 5: "Razer Synapse.exe",
+                                            6: "RazerAppEngine.exe", 7: "game.exe", 8: "old.exe",
+                                            9: "TuyaChroma.exe"})
+    alive = lambda pid: pid != 8  # noqa: E731 - old.exe has exited, its entry stayed
+    assert engine.other_chroma_apps(apps, OWN, alive) == {7: "game.exe"}
+    assert engine.other_chroma_apps(None, OWN, alive) == {}
+
+
+def test_full_sync_hands_razer_devices_to_a_game(monkeypatch) -> None:
+    """Synapse may keep our effect on top: when a game starts, let go of the SDK."""
+    from tuyachroma import winsys
+
+    monkeypatch.setattr(engine, "SERVICE_CHECK_INTERVAL", 0.05)
+    state = {"running": set(), "current": OWN}
+    monkeypatch.setattr(winsys, "process_alive", lambda pid: pid in state["running"])
+    dll = FakeDll()
+
+    class Reader:
+        def __init__(self, sources):
+            pass
+
+        def wait(self, ms):
+            time.sleep(0.005)
+
+        def read(self, src):
+            if state["current"] == OWN:
+                return Frame(src, 7, [(1, 1, 1)] * DEVICES[src].count, 1)
+            return Frame(src, 6, [(0, 255, 0)] * DEVICES[src].count, 1)
+
+        def read_apps(self):
+            apps = {OWN: "TuyaChroma.exe"}
+            apps.update({pid: "game.exe" for pid in state["running"]})
+            return ChromaApps(current_pid=state["current"], apps=apps)
+
+        def close(self):
+            pass
+
+    workers = []
+    service = engine.SyncService(
+        reader_factory=Reader, worker_factory=lambda c: workers.append(Recorder(c)) or workers[-1],
+        service_check=lambda: True, output_factory=lambda: NativeChroma(dll),
+        own_pid=OWN, screen_factory=lambda: None,
+    )
+    config = AppConfig(devices=[Device(id="a", name="a", local_key="k", ip="1.1.1.1", enabled=True)])
+    config.settings.idle = "full"
+    service.start(config)
+
+    def wait(cond, t=3):
+        end = time.time() + t
+        while time.time() < end and not cond():
+            time.sleep(0.01)
+        return cond()
+
+    try:
+        assert wait(lambda: any(c[0] == "CreateKeyboardEffect" for c in dll.calls))
+        state["running"].add(77)  # the game starts; Synapse still shows our effect
+        assert wait(lambda: ("UnInit",) in dll.calls)  # we let go of the Razer devices
+        assert service.player.yielded and "gra" in service.player.output_status
+        state["current"] = 77  # now the game's effect is shown
+        assert wait(lambda: workers[0].calls and workers[0].calls[-1] == (0, 255, 0))
+        assert service.game_active
+        inits = dll.calls.count(("Init",))
+        state["running"].clear()  # game closed
+        state["current"] = OWN
+        assert wait(lambda: dll.calls.count(("Init",)) > inits)  # our profile is back
+        assert not service.player.yielded and not service.game_active
+    finally:
+        service.stop()

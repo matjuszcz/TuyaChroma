@@ -62,6 +62,21 @@ def detect_keyboard_layout() -> str:
     return razer_devices.keyboard_layout(razer_devices.detect())
 
 
+# Chroma apps that are not games (Synapse itself, this program)
+NOT_GAMES = ("razer", "synapse", "tuyachroma")
+
+
+def other_chroma_apps(apps: ChromaApps | None, own_pid: int,
+                      alive: Callable[[int], bool] | None = None) -> dict[int, str]:
+    """Running Chroma apps other than this program and Synapse: games (or e.g. Wallpaper Engine)."""
+    if apps is None:
+        return {}
+    if alive is None:
+        from .winsys import process_alive as alive  # noqa: PLC0415
+    return {pid: name for pid, name in apps.apps.items()
+            if pid != own_pid and not any(n in name.lower() for n in NOT_GAMES) and alive(pid)}
+
+
 def is_game_active(frames: dict[str, Frame | None], apps: ChromaApps | None,
                    own_pid: int, full_sync: bool) -> bool:
     """Does a game (another Chroma app) control the lighting right now?"""
@@ -442,6 +457,8 @@ class SyncService:
         last_check = time.monotonic()
 
         last_error = ""
+        last_others: dict[int, str] = {}
+        was_game = False
         try:
             while not self._stop.is_set():
                 try:
@@ -477,8 +494,23 @@ class SyncService:
                         warned_no_apps = True
                         _LOGGER.warning("Synapse's Chroma app list is not available: games can't be "
                                         "told apart from our own effect in full sync mode")
+                    others = other_chroma_apps(apps, self._own_pid)
+                    if others != last_others:
+                        _LOGGER.info("Chroma apps running: %s",
+                                     ", ".join(f"{n} ({p})" for p, n in others.items()) or "none besides us")
+                        last_others = others
+                    if self.player is not None:
+                        # Full sync: a game is running - hand it the Razer devices.
+                        self.player.yielded = full_sync and bool(others)
                     self.game_active = is_game_active(frames, apps, self._own_pid, full_sync)
                     self.game_name = apps.current_name if (self.game_active and apps) else ""
+                    if self.game_active != was_game:
+                        was_game = self.game_active
+                        if self.game_active:
+                            _LOGGER.info("Game effect active: %s (sources: %s)", self.game_name or "?",
+                                         ", ".join(s for s, f in frames.items() if f is not None and f.active))
+                        else:
+                            _LOGGER.info("Game effect ended")
                     profile_frames = strip = None
                     if self.player is not None:
                         self.player.paused = self.game_active
