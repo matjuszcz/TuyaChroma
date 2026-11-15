@@ -207,6 +207,7 @@ class BulbWorker(threading.Thread):
         self.status = STATUS_CONNECTING
         self.latency_ms: float | None = None  # measured: color sent -> bulb confirmed
         self.no_ack = False  # the light never confirms colors (only timeouts)
+        self._last_value: tuple | None = None  # what the light shows now (mode, transition, hex)
         # pause between colors for a bulb that can't keep up (>= cfg.min_interval)
         self.slow_interval = _learned_slow.get(cfg.id, 0.0)
         self._last_problem = 0.0
@@ -391,6 +392,7 @@ class BulbWorker(threading.Thread):
         if method == "music" and not dev.dpset.get("music"):
             _LOGGER.warning("%s: music mode not supported, using colour mode", self.cfg.name)
         self._sent = None
+        self._last_value = None  # unknown after (re)connecting: send in full
         self._scene_sent = None  # a light that rebooted lost its effect: send it again
         # _in_sync_mode survives reconnects: the bulb may still show our color.
         self.connected = True
@@ -502,27 +504,42 @@ class BulbWorker(threading.Thread):
             self._remember_original()
         scene_was_on = self._scene_sent is not None
         self._scene_sent = None
+        full = not self._in_sync_mode or scene_was_on
+        hexval = tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])
+        value_key = (self.use_music, self.transition, hexval)
+        if not full and value_key == self._last_value:
+            # Exactly what the light already shows (a refresh, or two colors that
+            # round to the same value). Tuya lights only answer when a value
+            # changes: waiting for an answer here blocked the light for the 3 s
+            # timeout (the GU10s in breathing; "lights freeze now and then").
+            if self.use_music:
+                dev.set_music_colour(self.transition, r, g, b, nowait=True)
+            else:
+                dev.set_multiple_values({dps["colour"]: hexval}, nowait=True)
+            self._sent = rgb
+            return
         if self.use_music:
-            if not self._in_sync_mode or scene_was_on:
+            if full:
                 dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"})
             started = time.perf_counter()
             check_reply(dev.set_music_colour(self.transition, r, g, b), "color")
         else:
-            values = {dps["colour"]: tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])}
-            if not self._in_sync_mode or scene_was_on:
+            values = {dps["colour"]: hexval}
+            if full:
                 values[dps["switch"]] = True
                 if dps.get("mode"):
                     values[dps["mode"]] = "colour"
             started = time.perf_counter()
             check_reply(dev.set_multiple_values(values), "color")
+        self._last_value = value_key
         took = (time.perf_counter() - started) * 1000
         if took >= NO_ACK_MS:
             # No confirmation, only the timeout (seen with music data on GU10 bulbs):
             # that is not the light's delay - don't send effects 3 s ahead for it.
             if not self.no_ack:
-                _LOGGER.warning("%s: the light doesn't confirm colors in %s mode (each waited "
-                                "%.0f ms) - choose 'Automatycznie' or 'Kolor'", self.cfg.name,
-                                "music" if self.use_music else "colour", took)
+                _LOGGER.warning("%s: a color was not confirmed (waited %.0f ms) in %s mode%s",
+                                self.cfg.name, took, "music" if self.use_music else "colour",
+                                " - choose 'Automatycznie'" if self.use_music else "")
             self.no_ack = True
         else:
             self._record_latency(took)
@@ -555,6 +572,7 @@ class BulbWorker(threading.Thread):
         values[dev.dpset["switch"]] = True
         check_reply(dev.set_multiple_values(values), "effect")
         self._in_sync_mode = True
+        self._last_value = None
         self._scene_sent = scene
         self._sent = None
         self.status = STATUS_SCENE
@@ -607,6 +625,7 @@ class BulbWorker(threading.Thread):
             self._dev.set_multiple_values(values, nowait=False)
         self._in_sync_mode = False
         self._sent = None
+        self._last_value = None
         self.status = STATUS_READY
         _LOGGER.info("%s: restored original state", self.cfg.name)
 

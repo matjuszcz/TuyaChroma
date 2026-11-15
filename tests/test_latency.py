@@ -257,7 +257,7 @@ def test_missing_confirmation_is_not_counted_as_delay(monkeypatch, caplog) -> No
         finally:
             worker.stop(2)
     assert worker.latency_ms is None  # effects are not sent seconds ahead because of it
-    assert sum("doesn't confirm colors" in r.message for r in caplog.records) == 1
+    assert sum("was not confirmed" in r.message for r in caplog.records) == 1
 
 
 def test_offset_includes_the_lights_fade() -> None:
@@ -331,3 +331,40 @@ def test_old_default_colour_mode_becomes_auto(tmp_path) -> None:
     path.write_text(json.dumps({"settings": {"config_rev": 2}, "devices": [
         {"id": "b1", "name": "RGB Biuro 1", "local_key": "", "method": "colour"}]}), encoding="utf-8")
     assert load_cfg(path).devices[0].method == "colour"  # chosen by the user later: kept
+
+
+def test_unchanged_value_does_not_block_the_light(monkeypatch) -> None:
+    """1.9.16 log: GU10s 'did not confirm' in colour mode - Tuya lights answer only
+    when a value changes, so resending the same value waited for the 3 s timeout."""
+    class TuyaLike(FakeBulb):
+        shown = None
+        blocked = 0
+
+        def set_multiple_values(self, values, nowait=False):
+            super().set_multiple_values(values, nowait)
+            value = values.get("24")
+            if value is not None and value == TuyaLike.shown and not nowait:
+                TuyaLike.blocked += 1
+                time.sleep(0.3)  # no answer: tinytuya waits for its timeout
+            TuyaLike.shown = value or TuyaLike.shown
+
+    monkeypatch.setattr(bulbs, "REFRESH_EVERY", 0.05)  # the same color is sent again often
+    TuyaLike.shown, TuyaLike.blocked = None, 0
+    bulb = TuyaLike(music=False)
+    worker = BulbWorker(BulbConfig(name="GU10", id="u", ip="1", local_key="k", min_interval=0.02),
+                        device_factory=lambda _c: bulb)
+    worker.start()
+    try:
+        assert wait_for(lambda: worker.connected)
+        worker.set_color((200, 10, 10))
+        assert wait_for(lambda: len(bulb.sent) >= 1)
+        n = len(bulb.sent)
+        for _ in range(8):
+            worker.set_color((200, 10, 10))  # a steady color (e.g. a game) - refreshed
+            time.sleep(0.05)
+        assert len(bulb.sent) > n  # it was refreshed ...
+        assert TuyaLike.blocked == 0 and not worker.no_ack  # ... without blocking the light
+        worker.set_color((10, 200, 10))  # a real change is still confirmed and measured
+        assert wait_for(lambda: bulb.sent[-1][1].get("24") != TuyaLike.shown or worker.latency_ms)
+    finally:
+        worker.stop(2)
