@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import functools
 import logging
 import os
 import threading
@@ -16,6 +17,7 @@ from .inputhook import KeyboardHook
 from .player import EffectPlayer
 from .profiles import Profile
 from .razer import (
+    DEVICES,
     ChromaApps,
     ChromaReader,
     Frame,
@@ -78,6 +80,7 @@ def dispatch(
     profile: Profile | None = None,
     allow_effect: Callable[[Any], bool] = lambda _w: True,
     keyboard_area=None,
+    effect_color: Callable[[Any, int, int], RGB] | None = None,
 ) -> bool:
     """Send colors to the bulb workers. Returns True if a game color was used."""
     used_game = False
@@ -86,6 +89,9 @@ def dispatch(
         if game_active and frame is not None and frame.active:
             worker.set_color(bulb_color(worker.cfg, frame, keyboard_area))
             used_game = True
+        elif idle in ("full", "effect") and effect_color is not None:
+            if allow_effect(worker):  # bulbs change at most bulb_effect_rate times per second
+                worker.set_color(effect_color(worker, index, len(workers)))
         elif idle in ("full", "effect") and profile_frames is not None:
             if not allow_effect(worker):
                 continue  # bulbs change at most bulb_effect_rate times per second
@@ -296,6 +302,39 @@ class SyncService:
     def bulb_statuses(self) -> dict[str, str]:
         return {w.cfg.id: w.status for w in self.workers}
 
+    def bulb_latencies(self) -> dict[str, float | None]:
+        """Measured delay per bulb (ms): color sent -> bulb confirmed."""
+        return {w.cfg.id: getattr(w, "latency_ms", None) for w in self.workers}
+
+    @staticmethod
+    def latency_offset_ms(worker, settings) -> float:
+        """How far ahead (ms) an effect color is sent to this bulb."""
+        if settings.latency_mode == "auto":
+            base = getattr(worker, "latency_ms", None) or 0.0
+        elif settings.latency_mode == "manual":
+            base = float(settings.latency_ms)
+        else:
+            base = 0.0
+        return max(-1000.0, min(3000.0, base + getattr(worker.cfg, "latency_adjust_ms", 0)))
+
+    def _bulb_effect_color(self, worker, index: int, count: int, settings, profile) -> RGB:
+        """The profile's color for one bulb, rendered ahead by the bulb's delay.
+
+        Effects are computed by the program, so the color the bulb will need a
+        moment from now is known now: sending it early hides the Wi-Fi/bulb lag.
+        """
+        player = self.player
+        assert player is not None
+        cfg = worker.cfg
+        t = time.monotonic() + self.latency_offset_ms(worker, settings) / 1000
+        renderer = player.renderer
+        if cfg.zone == "all" and profile.effect not in DEVICE_EFFECTS:
+            rgb = renderer.frame(f"bulbs@{cfg.id}", max(1, count), 1, t)[min(index, count - 1)]
+            return adjust(rgb, cfg.brightness, cfg.min_brightness)
+        spec = DEVICES[cfg.source]
+        colors = renderer.frame(f"{cfg.source}@{cfg.id}", spec.width, spec.height, t)
+        return zone_color(cfg, colors, KEYBOARD_AREAS[self.keyboard_layout])
+
     # ---------------------------------------------------------------- thread
 
     def _release_all(self) -> None:
@@ -366,8 +405,12 @@ class SyncService:
                     self.player.paused = self.game_active
                     profile_frames, strip = self.player.latest()
                 profile = self._profile or settings.profile
+                effect_color = None
+                if self.player is not None:
+                    effect_color = functools.partial(self._bulb_effect_color,
+                                                     settings=settings, profile=profile)
                 dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
-                         profile, allow_effect, KEYBOARD_AREAS[self.keyboard_layout])
+                         profile, allow_effect, KEYBOARD_AREAS[self.keyboard_layout], effect_color)
                 self.razer_status = self._status_text(idle, profile.name)
                 spent = time.monotonic() - started
                 if spent < period:

@@ -45,6 +45,7 @@ class BulbConfig:
     min_brightness: float = 0.05
     method: str = "colour"  # colour (reliable) | music (faster, not on every bulb) | auto
     min_interval: float = 0.15
+    latency_adjust_ms: int = 0  # extra per-bulb correction for effect timing
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BulbConfig:
@@ -88,6 +89,7 @@ class BulbWorker(threading.Thread):
         self.use_music = False
         self.connected = False
         self.status = STATUS_CONNECTING
+        self.latency_ms: float | None = None  # measured: color sent -> bulb confirmed
 
     # ------------------------------------------------------------ public API
 
@@ -232,6 +234,7 @@ class BulbWorker(threading.Thread):
         if self.use_music:
             if not self._in_sync_mode:
                 dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"})
+            started = time.perf_counter()
             dev.set_music_colour(0, r, g, b)
         else:
             values = {dps["colour"]: tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])}
@@ -239,10 +242,20 @@ class BulbWorker(threading.Thread):
                 values[dps["switch"]] = True
                 if dps.get("mode"):
                     values[dps["mode"]] = "colour"
+            started = time.perf_counter()
             dev.set_multiple_values(values)
+        self._record_latency((time.perf_counter() - started) * 1000)
         self._in_sync_mode = True
         self.status = STATUS_SYNC
         self._sent = rgb
+
+    def _record_latency(self, ms: float) -> None:
+        """Smoothed send->confirm time; ignores single outliers (e.g. Wi-Fi hiccups)."""
+        ms = max(0.0, min(ms, 5000.0))
+        if self.latency_ms is None:
+            self.latency_ms = ms
+        else:
+            self.latency_ms += 0.2 * (min(ms, self.latency_ms * 3 + 50) - self.latency_ms)
 
     def _restore(self) -> None:
         if not self._in_sync_mode or self._dev is None:

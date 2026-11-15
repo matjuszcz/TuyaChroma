@@ -147,6 +147,18 @@ Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life 
   * *Zostaw ostatni kolor z gry*.
 * **Zmiany koloru żarówek w efektach:** domyślnie 1 na sekundę, oszczędnie dla żarówek. Ustaw 3–5, jeśli chcesz płynniej.
 
+### 6. Opóźnienie synchronizacji
+
+Każda zmiana koloru leci do żarówki przez Wi-Fi, a żarówka sama płynnie przechodzi między kolorami, więc żarówki są trochę w tyle za klawiaturą.
+
+* **Pomiar:** kolumna **Opóźnienie** w zakładce *Żarówki* pokazuje na żywo, ile każda żarówka potrzebuje na potwierdzenie nowego koloru (uśrednione, pojedyncze „czkawki” Wi-Fi są pomijane).
+* **Kompensacja w efektach** (*Ustawienia → Opóźnienie żarówek w efektach*). Efekty liczy program, więc wie z góry, jaki kolor będzie za chwilę, i wysyła go żarówce **z wyprzedzeniem**:
+  * *Automatyczna* (domyślnie): wyprzedzenie równe zmierzonemu opóźnieniu każdej żarówki;
+  * *Ręczna*: jedno wyprzedzenie dla wszystkich, np. 300 ms;
+  * *Wyłączona*.
+* **Korekta dla jednej żarówki** (ustawienia żarówki → *Korekta opóźnienia*): np. taśma LED, która wolniej przechodzi między kolorami, dostaje +200 ms. Wartość ujemna, gdy żarówka wyprzedza klawiaturę.
+* **Kolory z gier** zawsze docierają z niewielkim opóźnieniem (zwykle 0,1–0,3 s). Grą steruje klawiatura bezpośrednio, a program widzi kolor dopiero, gdy już na niej jest, więc nie da się go wysłać wcześniej.
+
 ## Na co dzień
 
 * Program działa w **zasobniku** (zielona ikona obok zegara). Zarówno minimalizacja (**_**), jak i zamknięcie okna (**X**) chowają je do zasobnika. Program działa wtedy dalej. Całkowicie zamyka go dopiero *Zakończ* w menu ikony.

@@ -31,6 +31,11 @@ KEYBOARD_AREAS = {
 }
 
 
+def base_target(target: str) -> str:
+    """'keyboard@bulb-1' -> 'keyboard': same device, separate effect state."""
+    return target.split("@", 1)[0]
+
+
 def parse_hex(color: str, default: RGB = (68, 214, 44)) -> RGB:
     color = (color or "").strip().lstrip("#")
     if len(color) != 6:
@@ -119,6 +124,7 @@ class Renderer:
 
     def _area(self, target: str, w: int, h: int) -> tuple[float, float, float, float]:
         """(x0, width, y0, height) of the part of the grid that has LEDs."""
+        target = base_target(target)
         if target in ("keyboard", "keyboard_ext"):
             c0, c1, r0, r1 = self.keyboard_area
             off = 1 if target == "keyboard_ext" else 0  # keys sit inside the 8x24 grid
@@ -229,6 +235,7 @@ class Renderer:
         presses = self._recent_presses(t, life)
         n = w * h
         out = [BLACK] * n
+        target = base_target(target)
         if target in ("keyboard", "keyboard_ext"):
             off = 1 if target == "keyboard_ext" else 0  # 6x22 keys sit inside the 8x24 grid
             for row, col, t0, color in presses:
@@ -255,8 +262,8 @@ class Renderer:
             age = t - t0
             radius = age * speed
             fade = 1 - age / life
-            if target in ("keyboard", "keyboard_ext"):
-                off = 1 if target == "keyboard_ext" else 0
+            if base_target(target) in ("keyboard", "keyboard_ext"):
+                off = 1 if base_target(target) == "keyboard_ext" else 0
                 cx, cy, sx, sy = col + off, row + off, 1.0, 1.0
             else:  # start from the device's center, scaled to keyboard size
                 cx, cy = (w - 1) / 2, (h - 1) / 2

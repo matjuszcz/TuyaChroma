@@ -47,6 +47,7 @@ class Device:
     min_brightness: float = 0.05
     method: str = "colour"
     min_interval: float = 0.15
+    latency_adjust_ms: int = 0  # per-bulb correction for effect timing (ms)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Device:
@@ -59,6 +60,7 @@ class Device:
             version=self.version or "3.3", source=self.source, zone=self.zone,
             mode=self.mode, brightness=self.brightness, min_brightness=self.min_brightness,
             method=self.method, min_interval=self.min_interval,
+            latency_adjust_ms=int(self.latency_adjust_ms),
         )
 
     @property
@@ -76,6 +78,9 @@ class Settings:
     bulb_effect_rate: float = 1.0  # bulb color changes per second while a profile plays
     keyboard_layout: str = "auto"  # auto (detected) | full | tkl | mini (60%)
     auto_update: bool = True  # check for program and device database updates daily
+    # Effects: send bulbs their color ahead of time to make up for their delay.
+    latency_mode: str = "auto"  # auto (measured per bulb) | manual (latency_ms) | off
+    latency_ms: int = 300
     fps: float = 20
     sync_enabled: bool = True
 
@@ -197,6 +202,9 @@ def load(path: Path | None = None) -> AppConfig:
     settings.bulb_effect_rate = max(0.5, min(5.0, float(settings.bulb_effect_rate)))
     if settings.keyboard_layout not in ("auto", "full", "tkl", "mini"):
         settings.keyboard_layout = "auto"
+    if settings.latency_mode not in ("auto", "manual", "off"):
+        settings.latency_mode = "auto"
+    settings.latency_ms = max(0, min(3000, int(settings.latency_ms)))
     session: dict[str, Any] = {}
     if data.get("tuya_session"):
         try:

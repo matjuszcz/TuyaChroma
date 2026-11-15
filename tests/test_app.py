@@ -693,3 +693,53 @@ def test_tray_menu_builds_with_real_pystray(tmp_path, monkeypatch) -> None:
         if not app._quitting:
             app._quitting = True
             app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_buttons_visible_in_every_tab(tmp_path, monkeypatch) -> None:
+    """Regression: new settings pushed 'Zapisz ustawienia' below the window."""
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tkinter import ttk
+
+    from tuyachroma import gui
+
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    config = AppConfig(devices=[dev("a")])
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    app.root.geometry("900x600")
+    try:
+        app.tree.selection_set("a")
+        app._load_editor()
+
+        def buttons(widget):
+            for child in widget.winfo_children():
+                if isinstance(child, ttk.Button):
+                    yield child
+                yield from buttons(child)
+
+        must_see = {"Zapisz ustawienia", "Otwórz folder z logami", "Zapisz", "Testuj (mignij)",
+                    "Szukaj w sieci", "Odśwież z konta", "Zapisz profil", "Odśwież listę"}
+        seen = set()
+        for index in range(len(app.notebook.tabs())):
+            app.notebook.select(index)
+            for _ in range(5):
+                app.root.update()
+            win_bottom = app.root.winfo_rooty() + app.root.winfo_height()
+            win_right = app.root.winfo_rootx() + app.root.winfo_width()
+            for b in buttons(app.notebook.nametowidget(app.notebook.select())):
+                text = str(b.cget("text"))
+                if text not in must_see or not b.winfo_ismapped():
+                    continue
+                if b.winfo_toplevel() is not app.root:
+                    continue
+                if str(b.winfo_parent()).startswith(str(getattr(app, "settings_canvas", ""))):
+                    continue  # inside the scrolling area: reachable by scrolling
+                assert b.winfo_rooty() + b.winfo_height() <= win_bottom, f"{text} below the window"
+                assert b.winfo_rootx() + b.winfo_width() <= win_right, f"{text} cut off on the right"
+                assert b.winfo_width() >= 40, f"{text} squeezed"
+                seen.add(text)
+        assert must_see <= seen
+    finally:
+        service.stop()
+        app._quitting = True
+        app.root.destroy()

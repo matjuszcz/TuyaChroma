@@ -223,11 +223,12 @@ class App:
         ttk.Button(bar, text="Szukaj w sieci", command=self.scan_lan).pack(side="right")
         ttk.Button(bar, text="Odśwież z konta", command=self.refresh_from_account).pack(side="right", padx=6)
 
-        cols = ("on", "name", "ip", "version", "source", "zone", "status")
+        cols = ("on", "name", "ip", "version", "source", "zone", "latency", "status")
         self.tree = ttk.Treeview(tab, columns=cols, show="headings", height=10, selectmode="browse")
         for col, title, width in (
-            ("on", "✓", 40), ("name", "Nazwa", 200), ("ip", "IP", 120), ("version", "Wersja", 60),
-            ("source", "Źródło", 110), ("zone", "Strefa", 100), ("status", "Stan", 220),
+            ("on", "✓", 36), ("name", "Nazwa", 180), ("ip", "IP", 110), ("version", "Wersja", 55),
+            ("source", "Źródło", 100), ("zone", "Strefa", 90), ("latency", "Opóźnienie", 80),
+            ("status", "Stan", 200),
         ):
             self.tree.heading(col, text=title)
             self.tree.column(col, width=self.px(width), anchor="center" if col in ("on", "version") else "w")
@@ -244,6 +245,7 @@ class App:
         self.ed_version = tk.StringVar()
         self.ed_brightness = tk.DoubleVar(value=100)
         self.ed_method = tk.StringVar()
+        self.ed_latency = tk.IntVar(value=0)
         ttk.Checkbutton(self.editor, text="Steruj przez Razer", variable=self.ed_enabled).grid(row=0, column=0, sticky="w")
         ttk.Label(self.editor, text="Źródło koloru:").grid(row=0, column=1, sticky="e", padx=(16, 4))
         ttk.Combobox(self.editor, textvariable=self.ed_source, state="readonly", width=14,
@@ -261,10 +263,15 @@ class App:
         ttk.Label(self.editor, text="Tryb:").grid(row=2, column=3, sticky="e", padx=(16, 4), pady=(8, 0))
         ttk.Combobox(self.editor, textvariable=self.ed_method, state="readonly", width=30,
                      values=list(METHOD_LABELS.values())).grid(row=2, column=4, sticky="w", pady=(8, 0))
+        ttk.Label(self.editor, text="Korekta opóźnienia (ms):").grid(row=3, column=1, sticky="e", padx=(16, 4), pady=(8, 0))
+        ttk.Spinbox(self.editor, from_=-1000, to=1000, increment=50, textvariable=self.ed_latency,
+                    width=7).grid(row=3, column=2, sticky="w", pady=(8, 0))
+        ttk.Label(self.editor, text="(+ gdy żarówka spóźnia się względem klawiatury)",
+                  foreground="#666").grid(row=3, column=3, columnspan=2, sticky="w", padx=(16, 0), pady=(8, 0))
         btns = ttk.Frame(self.editor)
-        btns.grid(row=1, column=5, rowspan=2, sticky="e", padx=(24, 0))
-        ttk.Button(btns, text="Zapisz", command=self.save_editor).pack(fill="x")
-        ttk.Button(btns, text="Testuj (mignij)", command=self.test_bulb).pack(fill="x", pady=(6, 0))
+        btns.grid(row=4, column=0, columnspan=5, sticky="w", pady=(10, 0))
+        ttk.Button(btns, text="Zapisz", command=self.save_editor).pack(side="left")
+        ttk.Button(btns, text="Testuj (mignij)", command=self.test_bulb).pack(side="left", padx=8)
         self.editor.columnconfigure(5, weight=1)
 
     def _build_account_tab(self) -> None:
@@ -299,9 +306,40 @@ class App:
         self.qr_label.pack(anchor="w")
         self._update_account_label()
 
+    def _scrollable(self, parent):
+        """A frame that scrolls vertically when its content is taller than the window."""
+        canvas = tk.Canvas(parent, highlightthickness=0, borderwidth=0)
+        bar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas, padding=(16, 12, 16, 12))
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=bar.set)
+        inner.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+        canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+
+        def wheel(event) -> None:
+            if canvas.winfo_ismapped() and inner.winfo_height() > canvas.winfo_height():
+                canvas.yview_scroll(-1 * (event.delta // 120 or (1 if event.num == 4 else -1)), "units")
+
+        canvas.bind("<Enter>", lambda _e: (canvas.bind_all("<MouseWheel>", wheel),
+                                           canvas.bind_all("<Button-4>", wheel),
+                                           canvas.bind_all("<Button-5>", wheel)))
+        canvas.bind("<Leave>", lambda _e: (canvas.unbind_all("<MouseWheel>"),
+                                           canvas.unbind_all("<Button-4>"),
+                                           canvas.unbind_all("<Button-5>")))
+        self.settings_canvas = canvas
+        return inner
+
     def _build_settings_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=16)
-        self.notebook.add(tab, text="Ustawienia")
+        outer = ttk.Frame(self.notebook)
+        self.notebook.add(outer, text="Ustawienia")
+        bottom = ttk.Frame(outer, padding=(16, 6, 16, 8))
+        bottom.pack(side="bottom", fill="x")  # always visible, whatever the window height
+        ttk.Separator(outer, orient="horizontal").pack(side="bottom", fill="x")
+        body = ttk.Frame(outer)
+        body.pack(side="top", fill="both", expand=True)
+        tab = self._scrollable(body)
         s = self.config.settings
         self.set_autostart = tk.BooleanVar(value=s.autostart)
         self.set_minimized = tk.BooleanVar(value=s.start_minimized)
@@ -341,6 +379,26 @@ class App:
                   "Po wyłączeniu komputera, uśpieniu, zamknięciu Synapse lub programu albo wstrzymaniu "
                   "sterowania żarówki wracają do stanu sprzed przejęcia i dalej działają z Home Assistant."),
         ).pack(anchor="w", pady=(16, 0))
+        lat = ttk.LabelFrame(tab, text="Opóźnienie żarówek w efektach", padding=8)
+        lat.pack(anchor="w", fill="x", pady=(12, 0))
+        self.set_latency_mode = tk.StringVar(value=s.latency_mode)
+        self.set_latency_ms = tk.IntVar(value=s.latency_ms)
+        lrow = ttk.Frame(lat)
+        lrow.pack(anchor="w")
+        for mode, label in (("auto", "Automatyczna (z pomiaru każdej żarówki)"),
+                            ("manual", "Ręczna:"), ("off", "Wyłączona")):
+            ttk.Radiobutton(lrow, text=label, value=mode, variable=self.set_latency_mode).pack(side="left", padx=(0, 6))
+            if mode == "manual":
+                ttk.Spinbox(lrow, from_=0, to=3000, increment=50, textvariable=self.set_latency_ms,
+                            width=6).pack(side="left")
+                ttk.Label(lrow, text="ms").pack(side="left", padx=(2, 14))
+        ttk.Label(
+            lat, foreground="#666", wraplength=self.px(780), justify="left",
+            text=("Efekty liczy program, więc wysyła żarówkom kolor z wyprzedzeniem równym ich opóźnieniu – "
+                  "wtedy świecą równo z klawiaturą. Zmierzone opóźnienie każdej żarówki widać w kolumnie "
+                  "„Opóźnienie” w zakładce Żarówki, a korektę dla jednej żarówki ustawisz w jej ustawieniach. "
+                  "Kolorów z gry nie da się wyprzedzić (gra steruje klawiaturą bezpośrednio)."),
+        ).pack(anchor="w", pady=(4, 0))
         upd = ttk.LabelFrame(tab, text="Aktualizacje", padding=8)
         upd.pack(anchor="w", fill="x", pady=(12, 0))
         self.set_auto_update = tk.BooleanVar(value=s.auto_update)
@@ -351,10 +409,8 @@ class App:
         ttk.Button(urow, text="Sprawdź teraz", command=lambda: self.check_updates(manual=True)).pack(side="left")
         self.update_status = tk.StringVar(value=f"Zainstalowana wersja: {__version__}")
         ttk.Label(urow, textvariable=self.update_status).pack(side="left", padx=10)
-        row = ttk.Frame(tab)
-        row.pack(anchor="w", pady=(16, 0))
-        ttk.Button(row, text="Zapisz ustawienia", command=self.save_settings).pack(side="left")
-        ttk.Button(row, text="Otwórz folder z logami", command=self.open_logs).pack(side="left", padx=8)
+        ttk.Button(bottom, text="Zapisz ustawienia", command=self.save_settings).pack(side="left")
+        ttk.Button(bottom, text="Otwórz folder z logami", command=self.open_logs).pack(side="left", padx=8)
 
     def _build_profiles_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=10)
@@ -610,6 +666,7 @@ class App:
     def refresh_devices(self) -> None:
         selected = self.tree.selection()
         statuses = self.service.bulb_statuses()
+        latencies = self.service.bulb_latencies()
         existing = set(self.tree.get_children())
         for dev in self.config.devices:
             if dev.enabled and not dev.ready:
@@ -620,9 +677,11 @@ class App:
                 status = "wstrzymana" if not self.config.settings.sync_enabled else "uruchamianie…"
             else:
                 status = "sterowana z HA" if dev.ip else "nie znaleziono w sieci"
+            ms = latencies.get(dev.id)
             values = (
                 "✔" if dev.enabled else "", dev.name, dev.ip or "?", dev.version or "auto",
                 SOURCE_LABELS.get(dev.source, dev.source), ZONE_LABELS.get(str(dev.zone), str(dev.zone)),
+                f"{ms:.0f} ms" if ms is not None else "–",
                 status,
             )
             if dev.id in existing:
@@ -662,6 +721,7 @@ class App:
         self.ed_version.set(dev.version)
         self.ed_brightness.set(round(dev.brightness * 100))
         self.ed_method.set(METHOD_LABELS.get(dev.method, METHOD_LABELS["colour"]))
+        self.ed_latency.set(int(dev.latency_adjust_ms))
 
     def save_editor(self) -> None:
         dev = self._selected_device()
@@ -676,6 +736,10 @@ class App:
         dev.version = version if version in ("3.1", "3.2", "3.3", "3.4", "3.5") else ""
         dev.brightness = round(self.ed_brightness.get()) / 100
         dev.method = _label_to_key(METHOD_LABELS, self.ed_method.get()) or "colour"
+        try:
+            dev.latency_adjust_ms = max(-1000, min(1000, int(self.ed_latency.get())))
+        except (tk.TclError, ValueError):
+            dev.latency_adjust_ms = 0
         if dev.method not in METHOD_LABELS:
             dev.method = "colour"
         self.refresh_devices()
@@ -1040,6 +1104,11 @@ class App:
         except (tk.TclError, ValueError):
             s.bulb_effect_rate = 1.0
         s.auto_update = self.set_auto_update.get()
+        s.latency_mode = self.set_latency_mode.get()
+        try:
+            s.latency_ms = max(0, min(3000, int(self.set_latency_ms.get())))
+        except (tk.TclError, ValueError):
+            s.latency_ms = 300
         s.keyboard_layout = _label_to_key(LAYOUT_LABELS, self.set_layout.get())
         if s.keyboard_layout not in LAYOUT_LABELS:
             s.keyboard_layout = "auto"
