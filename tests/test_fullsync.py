@@ -187,8 +187,9 @@ def test_full_sync_service(monkeypatch) -> None:
         assert any(c[0] == "CreateMouseEffect" for c in dll.calls)  # all devices get the profile
 
         state["current"] = 77  # a game takes over
-        deadline = time.time() + 2
-        while time.time() < deadline and workers[0].calls[-1] != (255, 0, 0):
+        deadline = time.time() + 2 + 2.0  # + AliveCache ttl: pid 77 was cached as not running
+        while time.time() < deadline and not (workers[0].calls[-1] == (255, 0, 0)
+                                               and service.game_active):
             time.sleep(0.01)
         assert workers[0].calls[-1] == (255, 0, 0) and service.game_active
         assert "game.exe" in service.razer_status and service.player.paused

@@ -50,7 +50,7 @@ def test_sdk_send_error_backs_off() -> None:
     assert 1 <= len(made) <= 2  # not reopened 20 times a second
 
 
-def test_sdk_unavailable_still_retries() -> None:
+def test_sdk_unavailable_is_not_hammered() -> None:
     calls = []
 
     def factory():
@@ -186,7 +186,10 @@ def test_slow_loading_game_gets_the_devices_after_probation(monkeypatch) -> None
     service._background_apps.add(55)  # learned: kept for the next start
     service.start(cfg)
     try:
-        time.sleep(0.3)
-        assert not service.player.yielded
+        assert wait(lambda: service.player is not None and "pełna" in service.razer_status)
+        end = time.time() + 0.5
+        while time.time() < end:
+            assert not service.player.yielded
+            time.sleep(0.02)
     finally:
         service.stop()
