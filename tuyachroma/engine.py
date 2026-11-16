@@ -796,6 +796,10 @@ class SyncService:
                                                 "check Chroma > Chroma Apps (TuyaChroma allowed, on top)")
                     else:
                         not_ours_since = None
+                        if raw_game or (player is not None and player.yielded):
+                            # a new game: after it, the devices get their own fresh tries
+                            reclaim_tries = 0
+                            self.razer_kept_by_synapse = False
                     if self.game_active != was_game:
                         was_game = self.game_active
                         if self.game_active:

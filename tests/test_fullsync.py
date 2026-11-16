@@ -136,7 +136,12 @@ class Recorder:
 
 
 def test_full_sync_service(monkeypatch) -> None:
+    from tuyachroma import winsys
+
     monkeypatch.setattr(engine, "SERVICE_CHECK_INTERVAL", 0.05)
+    # game.exe is listed, but not as a running process (this test is about Synapse's
+    # current app; whether some real process 77 exists on the test machine must not matter)
+    monkeypatch.setattr(winsys, "process_alive", lambda pid: False)
     state = {"current": OWN, "alive": True}
 
     class Reader:
@@ -875,5 +880,11 @@ def test_razer_devices_are_reclaimed_after_a_game(monkeypatch, caplog) -> None:
         n = dll.calls.count(("Init",))
         time.sleep(0.6)
         assert dll.calls.count(("Init",)) == n  # no endless reconnecting
+        # the next game resets the tries: after it, the devices are reclaimed again
+        state.update(game=True, current=26332)
+        assert wait(lambda: service.player.yielded and not service.razer_kept_by_synapse)
+        state.update(game=False, current=0)
+        n = dll.calls.count(("Init",))
+        assert wait(lambda: dll.calls.count(("Init",)) >= n + 2)
     finally:
         service.stop()
