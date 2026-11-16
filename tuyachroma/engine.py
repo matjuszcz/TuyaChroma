@@ -560,6 +560,11 @@ class SyncService:
         if config.settings.sync_enabled:
             self.start(config)
 
+    def bulb_colors(self) -> dict[str, RGB | None]:
+        """The color each light was last sent (None: not showing ours right now)."""
+        return {w.cfg.id: (getattr(w, "_sent", None) if getattr(w, "_in_sync_mode", False) else None)
+                for w in self.workers}
+
     def bulb_statuses(self) -> dict[str, str]:
         return {w.cfg.id: w.status for w in self.workers}
 

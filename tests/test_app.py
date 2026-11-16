@@ -1137,3 +1137,42 @@ def test_no_internet_is_not_an_expired_login(tmp_path, monkeypatch) -> None:
         assert "QR" not in app.busy_var.get() and config.tuya_session  # nothing alarming, login kept
     finally:
         app.root.destroy()
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_live_strip_shows_each_lights_color(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import gui, theme
+
+    config = AppConfig(devices=[dev("a", enabled=True, name="RGB Biuro 1"),
+                                dev("b", enabled=True, name="Light Bar"), dev("c", name="Lampa TV")])
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    monkeypatch.setattr(service, "bulb_colors", lambda: {"a": (140, 60, 255), "b": None})
+    try:
+        app.root.geometry("900x600")
+        for _ in range(10):
+            app.root.update()
+        app._paint_strip()
+        fills = [app.strip.itemcget(i, "fill") for i in app.strip.find_all()
+                 if app.strip.type(i) == "rectangle"]
+        assert fills == ["#8c3cff", theme.SURFACE]  # only lights Razer controls; one off
+        texts = [app.strip.itemcget(i, "text") for i in app.strip.find_all() if app.strip.type(i) == "text"]
+        assert texts == ["RGB Biuro 1", "Light Bar"]
+        for d in config.devices:
+            d.enabled = False
+        app._paint_strip()  # nothing selected: a hint instead
+        assert any("zaznacz" in app.strip.itemcget(i, "text") for i in app.strip.find_all())
+    finally:
+        app.root.destroy()
+
+
+def test_only_problems_are_colored_in_the_table() -> None:
+    from tuyachroma import gui
+
+    assert gui._status_tag("sterowana przez Razer") == "ok"
+    assert gui._status_tag("wyłączona / poza siecią") == "warn"
+    assert gui._status_tag("błąd: no status from bulb") == "err"
+    assert gui._status_tag("sterowana z HA") == "idle"
+    assert gui.theme.readable_on((255, 255, 0)) == gui.theme.INK      # dark text on yellow
+    assert gui.theme.readable_on((40, 0, 120)) == gui.theme.SURFACE   # light text on deep blue
