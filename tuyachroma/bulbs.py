@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections.abc import Callable
 import logging
+import select
 import threading
 import time
 from typing import Any
@@ -236,6 +237,7 @@ class BulbWorker(threading.Thread):
         self._reported = False
         self._resend_full = False  # the light lost our mode: send switch + mode with the color
         self._connect_dps: dict = {}
+        self._no_ack_streak = 0
         self._connected_at = 0.0
 
     # ------------------------------------------------------------ public API
@@ -442,7 +444,7 @@ class BulbWorker(threading.Thread):
         # (Switched off is left alone: that's someone turning it off on purpose.)
         mode = status["dps"].get(str(dev.dpset.get("mode")))
         expected = "music" if self.use_music else "colour"
-        if (self._in_sync_mode and mode is not None and mode != expected and mode != "scene"
+        if (self._in_sync_mode and mode is not None and mode != expected
                 and self._target is not None and not isinstance(self._target, NativeScene)):
             self._resend_full = True
             _LOGGER.log(logging.DEBUG if quiet else logging.INFO,
@@ -499,13 +501,22 @@ class BulbWorker(threading.Thread):
                 raise _Renew
             if now - last_beat > HEARTBEAT_EVERY:
                 # Always, also while colors are flowing: some lights expect it.
-                check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
+                if self.use_music:
+                    # music data is never answered: the heartbeat is what notices a
+                    # light that hung (error 914)
+                    check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
+                else:
+                    # colors are confirmed anyway; a waited heartbeat's empty answer
+                    # made tinytuya wait the whole timeout (colors froze ~0.4 s every
+                    # 8 s). Its answer is drained before the next waited command.
+                    self._dev.heartbeat(nowait=True)
                 last_beat = now
             capture = self._capture
             if capture is not None:
                 done, result = capture
                 self._capture = None
                 try:
+                    self._drain()
                     reply = self._dev.status()
                     if isinstance(reply, dict) and "dps" in reply:
                         result["dps"] = dict(reply["dps"])
@@ -557,12 +568,16 @@ class BulbWorker(threading.Thread):
         r, g, b = rgb
         if max(rgb) == 0:
             r = g = b = 1  # avoid switching off; nearly black
+        scene_was_on = self._scene_sent is not None
+        full = not self._in_sync_mode or scene_was_on or self._resend_full
         if not self._in_sync_mode:
             self._remember_original()
-        scene_was_on = self._scene_sent is not None
+            # Taken over from here on: if this send's answer is lost, the light may
+            # still have switched - it must be given back (and not re-remembered).
+            self._in_sync_mode = True
         self._scene_sent = None
-        full = not self._in_sync_mode or scene_was_on or self._resend_full
-        self._resend_full = False
+        # until a full send (switch + mode) gets through, the next one is full too
+        self._resend_full = full
         hexval = tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])
         value_key = (self.use_music, self.transition, hexval)
         if not full and value_key == self._last_value:
@@ -573,16 +588,18 @@ class BulbWorker(threading.Thread):
             if self.use_music:
                 dev.set_music_colour(self.transition, r, g, b, nowait=True)
             else:
-                dev.set_multiple_values({dps["colour"]: hexval}, nowait=True)
+                self._set_values({dps["colour"]: hexval}, nowait=True)
             self._sent = rgb
             return
         if self.use_music:
             if full:
-                dev.set_multiple_values({dps["switch"]: True, dps["mode"]: "music"})
+                self._drain()
+                check_reply(self._set_values({dps["switch"]: True, dps["mode"]: "music"}), "mode")
             # Lights never answer music data: don't wait for it (that stalled
             # every color for the 3 s timeout); their delay is not measured.
             dev.set_music_colour(self.transition, r, g, b, nowait=True)
             self._last_value = value_key
+            self._resend_full = False
             self._in_sync_mode = True
             self.status = STATUS_SYNC
             self._sent = rgb
@@ -599,7 +616,7 @@ class BulbWorker(threading.Thread):
                 # Lights don't always answer a color (GU10s: 3 s stalls in Spectrum, 1.9.17
                 # log). Waiting for every answer froze the light; only every few seconds
                 # one color is confirmed - to measure the delay and notice a lost light.
-                dev.set_multiple_values(values, nowait=True)
+                self._set_values(values, nowait=True)
                 self._last_value = value_key
                 self._in_sync_mode = True
                 self.status = STATUS_SYNC
@@ -607,30 +624,62 @@ class BulbWorker(threading.Thread):
                 self._send_count += 1
                 return
             self._last_probe = now
+            self._drain()  # so the answer read is this color's, not an older one
             started = time.perf_counter()
-            check_reply(dev.set_multiple_values(values), "color")
+            check_reply(self._set_values(values), "color")
         self._last_value = value_key
+        self._resend_full = False
         took = (time.perf_counter() - started) * 1000
         if took >= NO_ACK_MS:
             # No confirmation, only the timeout (seen with music data on GU10 bulbs):
             # that is not the light's delay - don't send effects 3 s ahead for it.
-            if not self.no_ack:
-                _LOGGER.warning("%s: a color was not confirmed (waited %.0f ms) in %s mode%s",
+            self._no_ack_streak += 1
+            if self._no_ack_streak >= 3 and not self.no_ack:
+                _LOGGER.warning("%s: colors are not confirmed (waited %.0f ms) in %s mode%s",
                                 self.cfg.name, took, "music" if self.use_music else "colour",
                                 " - choose 'Automatycznie'" if self.use_music else "")
-            self.no_ack = True
+                self.no_ack = True
         else:
+            self._no_ack_streak = 0
+            self.no_ack = False
             self._record_latency(took)
         self._in_sync_mode = True
         self.status = STATUS_SYNC
         self._sent = rgb
         self._send_count += 1
 
+    def _set_values(self, values: dict, nowait: bool = False):
+        """set_multiple_values, always as one command: after one failed write
+        tinytuya splits every later one into single values with 1 s pauses."""
+        dev = self._dev
+        if getattr(dev, "max_simultaneous_dps", 0):
+            dev.max_simultaneous_dps = 0
+        return dev.set_multiple_values(values, nowait=nowait)
+
+    def _drain(self) -> None:
+        """Read what's waiting on the connection (answers to colors sent without
+        waiting, status pushes): tinytuya returns the first waiting message as
+        the answer to the next command - an old answer would 'confirm' it."""
+        dev = self._dev
+        sock = getattr(dev, "socket", None)
+        if sock is None or not hasattr(dev, "receive"):
+            return
+        try:
+            for _ in range(20):
+                if not select.select([sock], [], [], 0)[0]:
+                    return
+                dev.receive()
+                if dev.socket is not sock:
+                    return  # tinytuya closed it (the light went away)
+        except (OSError, ValueError):
+            pass  # the next command finds out
+
     def _remember_original(self) -> None:
         """Taking over: remember how HA / the Tuya app left the bulb, to give it
         back later. Ask the bulb now - tinytuya's cache may be outdated."""
         dev = self._dev
         assert dev is not None
+        self._drain()
         fresh = dev.status()
         if fresh and "dps" in fresh and "Error" not in fresh:
             state = dev.state()
@@ -653,9 +702,11 @@ class BulbWorker(threading.Thread):
         assert dev is not None
         if not self._in_sync_mode:
             self._remember_original()
+            self._in_sync_mode = True  # taken over (given back even if the answer is lost)
         values = scene.values()
         values[dev.dpset["switch"]] = True
-        check_reply(dev.set_multiple_values(values), "effect")
+        self._drain()
+        check_reply(self._set_values(values), "effect")
         self._in_sync_mode = True
         self._last_value = None
         self._scene_sent = scene
@@ -708,7 +759,8 @@ class BulbWorker(threading.Thread):
         values = {dps[k]: v for k, v in self._original.items() if dps.get(k)}
         if values:
             # not confirmed: an error -> reconnect, and the restore is tried again
-            check_reply(self._dev.set_multiple_values(values, nowait=False), "restore")
+            self._drain()
+            check_reply(self._set_values(values), "restore")
         else:
             _LOGGER.warning("%s: state before takeover unknown - nothing to give back", self.cfg.name)
         self._original = {}

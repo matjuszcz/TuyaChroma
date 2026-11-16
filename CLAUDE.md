@@ -29,7 +29,7 @@ while it runs.
 
 ## Commands
 - Tests (Linux needs xvfb for Tk): `xvfb-run -a python -m pytest -q`. Baseline:
-  283 passed, 11 skipped. Run it twice after changes (timing tests).
+  304 passed, 11 skipped. Run it twice after changes (timing tests).
 - Lint: `python -m pyflakes tuyachroma tests`
 - GUI screenshot: build a Tk app with test data under xvfb (see tests/test_app.py
   for how to construct `App`).
@@ -66,7 +66,15 @@ Other rules:
     LINK {902, 914}.
   - Lights answer only when a value changes, so unchanged values are sent nowait.
     Music/DP 28 is never acked, so it is sent nowait.
-  - REPLY_TIMEOUT 0.35; COLOUR_FADE_MS 250; heartbeat 8 s.
+  - REPLY_TIMEOUT 0.35; COLOUR_FADE_MS 250; heartbeat 8 s (nowait in colour mode,
+    waited only in music mode, where it is the only check for a hung light).
+  - tinytuya returns the FIRST waiting message as a waited call's reply: `_drain()`
+    reads queued acks/status pushes before every waited command, and `_set_values()`
+    resets tinytuya's sticky single-DP fallback (`max_simultaneous_dps`).
+  - Takeover sets `_in_sync_mode` right after remembering the original state, so a
+    lost answer still gets the light given back; `_resend_full` stays set until a
+    full (switch + mode) send is confirmed.
+  - tests/fake_tuya.py: a fake v3.3 light on localhost for real-protocol tests.
   - Learned per-light state: slow rate, drop age (renew the connection before the
     bulb resets), `rate_not_the_cause`, `_music_hangs`.
   - `update_config` applies changes live, without reconnecting.

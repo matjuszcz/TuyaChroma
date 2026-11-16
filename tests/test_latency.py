@@ -265,14 +265,16 @@ def test_missing_confirmation_is_not_counted_as_delay(monkeypatch, caplog) -> No
         worker.start()
         try:
             assert wait_for(lambda: worker.connected)
-            worker.set_color((255, 0, 0))
+            for rgb in ((255, 0, 0), (0, 255, 0), (0, 0, 255), (9, 9, 9)):  # several in a row
+                worker.set_color(rgb)
+                time.sleep(0.15)
             assert wait_for(lambda: worker.no_ack)
             worker.set_color((0, 255, 0))
             time.sleep(0.3)
         finally:
             worker.stop(2)
     assert worker.latency_ms is None  # effects are not sent seconds ahead because of it
-    assert sum("was not confirmed" in r.message for r in caplog.records) == 1
+    assert sum("not confirmed" in r.message for r in caplog.records) == 1
 
 
 def test_offset_includes_the_lights_fade() -> None:
@@ -444,7 +446,9 @@ def test_reply_timeout_is_not_taken_for_delay() -> None:
         worker.set_color((255, 0, 0))
         assert wait_for(lambda: worker.latency_ms is not None)
         first = worker.latency_ms
-        worker.set_color((0, 0, 255))
+        for rgb in ((0, 0, 255), (0, 255, 0), (9, 9, 9)):
+            worker.set_color(rgb)
+            time.sleep(0.45)
         assert wait_for(lambda: worker.no_ack, 3)
         assert worker.latency_ms == first  # the timeout was not recorded as delay
     finally:
