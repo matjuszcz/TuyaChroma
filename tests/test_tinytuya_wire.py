@@ -47,6 +47,7 @@ def test_measured_delay_is_the_lights_own_after_unconfirmed_refreshes() -> None:
         assert w.latency_ms is not None and w.latency_ms >= 60
     finally:
         w.stop(5)
+        fake.close()
 
 
 def test_lost_restore_is_not_reported_as_done() -> None:
@@ -66,6 +67,7 @@ def test_lost_restore_is_not_reported_as_done() -> None:
         assert _wait(lambda: fake.dps["21"] == "white" and w.status == bulbs.STATUS_READY, 20)
     finally:
         w.stop(5)
+        fake.close()
 
 
 def test_restore_after_a_lost_command_is_one_command() -> None:
@@ -111,6 +113,7 @@ def test_lost_takeover_answer_still_gives_the_light_back() -> None:
         assert _wait(lambda: fake.dps["21"] == "white" and w.status == bulbs.STATUS_READY, 20)
     finally:
         w.stop(5)
+        fake.close()
 
 
 def test_color_after_a_heartbeat_is_not_held_back(monkeypatch) -> None:
@@ -126,6 +129,7 @@ def test_color_after_a_heartbeat_is_not_held_back(monkeypatch) -> None:
         time.sleep(2.5)
     finally:
         w.stop(5)
+        fake.close()
     sends = [t for t, c, d in fake.log if c == 7 and d and "24" in d]
     gaps = [b - a for a, b in zip(sends[5:], sends[6:])]
     assert gaps and max(gaps) < 0.33, max(gaps)  # (min interval 0.15 s + a little)
@@ -162,6 +166,7 @@ def test_answers_to_unconfirmed_colors_never_pile_up() -> None:
     finally:
         bulbs.BulbWorker._send = real_send
         w.stop(5)
+        fake.close()
     assert len(backlog) > 10
     assert max(backlog[5:]) < 400  # at most the last color's answer, never a pile
     sends = [t for t, c, d in fake.log if c == 7 and d and "24" in d]

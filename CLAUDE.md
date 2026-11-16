@@ -29,7 +29,7 @@ while it runs.
 
 ## Commands
 - Tests (Linux needs xvfb for Tk): `xvfb-run -a python -m pytest -q`. Baseline:
-  319 passed, 11 skipped. Run it twice after changes (timing tests).
+  321 passed, 11 skipped. Run it twice after changes (timing tests).
 - Lint: `python -m pyflakes tuyachroma tests`
 - GUI screenshot: build a Tk app with test data under xvfb (see tests/test_app.py
   for how to construct `App`).

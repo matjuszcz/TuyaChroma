@@ -434,3 +434,19 @@ def test_scene_mode_after_reconnect_is_switched_back_to_colors() -> None:
     worker2._in_sync_mode, worker2._target = True, NativeScene.from_state({"21": "scene"})
     worker2._connect()
     assert not worker2._resend_full  # it plays its own effect: leave it
+
+
+def test_slowed_light_speeds_up_again_after_a_quiet_while(monkeypatch) -> None:
+    from tuyachroma import bulbs as _b
+
+    monkeypatch.setattr(_b, "SLOW_RECOVER", 0.2)
+    worker, bulb = make_worker(music=False)
+    try:
+        worker._slow_down()  # a hiccup (not a drop-off): slower for a while
+        slowed = worker.slow_interval
+        assert slowed >= 0.3
+        t0 = time.monotonic()
+        worker.set_color_source(lambda: (int((time.monotonic() - t0) * 300) % 256, 9, 9), key=1)
+        assert wait_for(lambda: worker.slow_interval < slowed, 4)
+    finally:
+        worker.stop(2)

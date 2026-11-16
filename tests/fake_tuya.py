@@ -28,6 +28,12 @@ class FakeBulb:
             enc = AESCipher(KEY).encrypt(json.dumps(obj).encode(), False)
             payload = (b"3.3" + b"\0" * 12 + enc) if hdr else enc
         c.sendall(pack_message(TuyaMessage(seq, cmd, 0, struct.pack(">I", 0) + payload, 0, True, 0x55AA, None)))
+    def close(self):
+        """Stop listening and drop the connections (no leftovers between tests)."""
+        for c in self.clients + [self.srv]:
+            try: c.close()
+            except OSError: pass
+
     def push(self, changes):
         self.dps.update(changes)
         for c in self.clients:

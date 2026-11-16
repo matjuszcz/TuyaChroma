@@ -178,3 +178,31 @@ def test_damaged_database_cache_never_stops_the_program(tmp_path, monkeypatch) -
         assert devices_db.load()["version"] < 99  # the bundled database instead
     finally:
         devices_db.reset()
+
+
+def test_cloud_sdk_console_handler_masks_the_refresh_token(monkeypatch) -> None:
+    """tuya_sharing logs through its own console handler, outside ours: the filter
+    on its logger must mask the token there too."""
+    import io
+
+    from tuya_sharing import customerlogging
+
+    stream = io.StringIO()
+    monkeypatch.setattr(customerlogging.default_handler, "stream", stream)
+    sharing = logging.getLogger("tuya_sharing")
+    saved_filters, saved_level = sharing.filters[:], sharing.level
+    root = logging.getLogger()
+    saved_handlers, saved_root_level = root.handlers[:], root.level
+    try:
+        root.handlers = []
+        main.setup_logging(False)
+        sharing.error("net work error = url: /v1.0/m/token/RTSECRET77 x")
+    finally:
+        for h in root.handlers:
+            h.close()
+        root.handlers, sharing.filters = saved_handlers, saved_filters
+        root.setLevel(saved_root_level)
+        sharing.setLevel(saved_level)
+        for name in ("urllib3", "tinytuya"):
+            logging.getLogger(name).setLevel(logging.NOTSET)
+    assert "net work error" in stream.getvalue() and "RTSECRET77" not in stream.getvalue()
