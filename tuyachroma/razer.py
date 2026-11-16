@@ -391,6 +391,8 @@ def parse(device: str, raw: bytes) -> Frame | None:
         skip_suspend = data.effect_type == EFFECT_RESUME
         for back in range(1, RING):
             older = obj.data[(newest - back) % RING]
+            if older.effect_type == 0 and older.timestamp.ticks == 0:
+                break  # a slot never written (fresh ring): nothing before the control message
             if older.effect_type == EFFECT_SUSPEND and skip_suspend:
                 skip_suspend = False
                 continue
@@ -485,7 +487,6 @@ class ChromaReader:
     FILE_MAP_READ = 0x0004
     SYNCHRONIZE = 0x00100000
     EVENT_MODIFY_STATE = 0x0002
-    WAIT_TIMEOUT = 0x102
 
     def __init__(self, devices: list[str]) -> None:
         if sys.platform != "win32":

@@ -47,10 +47,6 @@ class CloudDevice:
     rgb: bool = False
     codes: tuple[str, ...] = ()  # the device's data points ("colour_data", "music_data", ...)
 
-    @property
-    def is_light(self) -> bool:
-        return self.category in LIGHT_CATEGORIES
-
 
 def _device(customer: Any) -> CloudDevice | None:
     key = getattr(customer, "local_key", None)

@@ -23,7 +23,6 @@ SEGMENT_CODES = {
     "paint_colour_data", "dreamlight_scene_mode", "dreamlightmic_music_data",
     "lightpixel_number_set", "light_pixel_number_set", "segment_dimming",
 }
-MUSIC_CODES = {"music_data", "dreamlightmic_music_data"}
 STRIP_CATEGORIES = {"dd", "fwd", "fwl"}  # LED strips, ambient lights
 
 # What is known about specific products (matched in the product name, lower case):

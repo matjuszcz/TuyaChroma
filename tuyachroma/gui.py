@@ -18,7 +18,7 @@ from tkinter import colorchooser, messagebox, ttk
 from typing import Any
 
 from . import __version__, devices_db, razer_devices, theme, updater, winsys
-from .bulbs import STATUS_OFFLINE, STATUS_SCENE, STATUS_SYNC, probe_version
+from .bulbs import RESTORE_KEYS, STATUS_OFFLINE, STATUS_SCENE, STATUS_SYNC, probe_version
 from .config import IDLE_MODES, SOURCES, ZONES, AppConfig, Device, config_dir, save
 from .engine import SyncService
 from .profiles import COLOR_MODES, DIRECTIONS, EFFECTS, Profile
@@ -1072,7 +1072,11 @@ class App:
                 return worker.read_state()
             from .bulbs import make_device  # noqa: PLC0415
 
-            reply = make_device(dev.bulb_config()).status()
+            device = make_device(dev.bulb_config())
+            try:  # many lights take only one local connection: don't leave this one open
+                reply = device.status()
+            finally:
+                device.close()
             return reply.get("dps") if isinstance(reply, dict) else None
 
         def done(dps) -> None:
@@ -1155,7 +1159,7 @@ class App:
             finally:  # give it back also when a color failed
                 bulb.set_multiple_values({
                     bulb.dpset[k]: original[k]
-                    for k in ("switch", "mode", "brightness", "colourtemp", "colour")
+                    for k in RESTORE_KEYS
                     if bulb.dpset.get(k) and original.get(k) is not None
                 })
                 bulb.close()
@@ -1779,10 +1783,12 @@ class App:
         s.sync_enabled = not s.sync_enabled
         save(self.config)
         if s.sync_enabled:
-            self.run_bg(lambda: self.service.start(self.config))
+            # (checked again when it runs: a quick pause after this must win)
+            self.run_bg(lambda: self.service.start(self.config) if s.sync_enabled else None)
         else:
             self.set_busy("Oddaję światła do HA…")
-            self.run_bg(self.service.stop, lambda _r: self.set_busy("Sterowanie wstrzymane."))
+            self.run_bg(lambda: self.service.stop() if not s.sync_enabled else None,
+                        lambda _r: self.set_busy("Sterowanie wstrzymane."))
         self._update_tray_menu()
 
     def _tick(self) -> None:

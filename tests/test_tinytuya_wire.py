@@ -111,3 +111,21 @@ def test_lost_takeover_answer_still_gives_the_light_back() -> None:
         assert _wait(lambda: fake.dps["21"] == "white" and w.status == bulbs.STATUS_READY, 20)
     finally:
         w.stop(5)
+
+
+def test_color_after_a_heartbeat_is_not_held_back(monkeypatch) -> None:
+    """Draining the heartbeat's empty answer must not wait for the reply timeout."""
+    monkeypatch.setattr(bulbs, "HEARTBEAT_EVERY", 0.3)
+    fake = FakeBulb(delay=0.01)
+    w = _worker(fake)
+    w.start()
+    try:
+        assert _wait(lambda: w.connected)
+        t0 = time.monotonic()
+        w.set_color_source(lambda: (int((time.monotonic() - t0) * 300) % 256, 40, 0), key=1)
+        time.sleep(2.5)
+    finally:
+        w.stop(5)
+    sends = [t for t, c, d in fake.log if c == 7 and d and "24" in d]
+    gaps = [b - a for a, b in zip(sends[5:], sends[6:])]
+    assert gaps and max(gaps) < 0.33, max(gaps)  # (min interval 0.15 s + a little)

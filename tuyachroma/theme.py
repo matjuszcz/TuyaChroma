@@ -46,7 +46,6 @@ PALETTES = {
         "PREVIEW": "#16181D",
     },
 }
-MODES = ("auto", "dark", "light")
 
 # The active palette (set by use(); dark until then)
 CANVAS = SURFACE = RAISED = HOVER = SELECT = LINE = INK = MUTED = IDLE = OK = WARN = ERROR = PREVIEW = ""

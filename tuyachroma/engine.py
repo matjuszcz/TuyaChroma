@@ -47,7 +47,6 @@ def bulb_color(cfg: BulbConfig, frame: Frame, keyboard_area=None) -> RGB:
     return zone_color(cfg, frame.colors, keyboard_area)
 
 
-LINK_LEDS = 5  # Chroma Link: one "LED" per linked device
 
 
 def link_slot(workers: list, worker) -> tuple[int, int] | None:
@@ -480,6 +479,7 @@ class SyncService:
             self._set_status("zatrzymane", "warn")
             self.game_active = False
             self.game_name = ""
+            self.razer_kept_by_synapse = False  # judged again after the next start
             _LOGGER.info("Sync stopped")
 
     @staticmethod

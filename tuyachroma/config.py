@@ -19,6 +19,7 @@ from .razer import DEVICES
 _LOGGER = logging.getLogger(__name__)
 
 SOURCES = list(DEVICES)
+METHODS = ("auto", "colour", "music", "jump")
 ZONES = ["all", "left", "center", "right", "top", "bottom"]
 # When Razer runs but no game drives Chroma:
 #   full    = the program plays the profile on all Razer devices AND the bulbs (in sync)
@@ -196,7 +197,12 @@ def load(path: Path | None = None) -> AppConfig:
         try:
             raw = dict(raw)
             raw["local_key"] = dpapi.unprotect(raw.get("local_key", ""))
-            devices.append(Device.from_dict(raw))
+            device = Device.from_dict(raw)
+            if device.source not in SOURCES:  # an unknown source stopped the whole sync
+                device.source = "keyboard"
+            if device.method not in METHODS:
+                device.method = "auto"
+            devices.append(device)
             redact.remember(raw["local_key"])
         except (OSError, TypeError, ValueError) as err:
             _LOGGER.warning("Skipping device %s: %s", raw.get("id"), err)

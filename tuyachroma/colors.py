@@ -6,8 +6,6 @@ import colorsys
 
 from .razer import DEVICES, RGB
 
-ZONES = ("all", "left", "center", "right", "top", "bottom")
-
 
 def zone_indices(device: str, zone: str | int | list[int],
                  area: tuple[int, int, int, int] | None = None) -> list[int]:

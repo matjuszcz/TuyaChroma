@@ -113,10 +113,13 @@ class EffectPlayer(threading.Thread):
                             self.output_status = "urządzenia Razer: steruje gra"
                         else:
                             self.output_status = "urządzenia Razer: efekt z programu"
-                            out = dict(frames)
-                            for name, (w, h) in EXTENDED_SIZES.items():
-                                out[name] = self.renderer.frame(name, w, h, t)
-                            self._send(out)
+                            try:
+                                extended = {name: self.renderer.frame(name, w, h, t)
+                                            for name, (w, h) in EXTENDED_SIZES.items()}
+                            except Exception:  # noqa: BLE001 - as above: keep the player alive
+                                _LOGGER.debug("Extended frame rendering failed", exc_info=True)
+                                extended = {}
+                            self._send({**frames, **extended})
                 spent = time.monotonic() - started
                 self._stop_event.wait(max(0.0, self._period - spent))
         finally:

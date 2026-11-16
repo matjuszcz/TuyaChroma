@@ -140,3 +140,11 @@ def test_resume_after_suspend_shows_the_effect_again() -> None:
     obj.data[7] = razer.DEVICES["keyboard"].struct.from_buffer_copy(dump("keyboard")).data[8]
     frame = razer.parse("keyboard", bytes(obj))
     assert frame.active and frame.effect_type == razer.EFFECT_CUSTOM
+
+
+def test_control_message_on_a_fresh_ring_is_not_a_black_frame() -> None:
+    obj = razer.DEVICES["keyboard"].struct()
+    obj.write_index = 1
+    obj.data[0].effect_type = razer.EFFECT_INIT
+    frame = razer.parse("keyboard", bytes(obj))
+    assert frame is None or not frame.active

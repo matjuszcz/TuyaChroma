@@ -236,3 +236,10 @@ def test_stale_frame_is_not_a_game_when_synapse_shows_its_profile() -> None:
     none = ChromaApps(current_pid=0, apps={OWN: "x.exe"})
     assert engine.is_game_active(_frames(True), none, OWN, False)  # old Synapse: can't tell
     assert not engine.is_game_active(_frames(True), none, OWN, False, current_known=True)
+
+
+def test_unknown_source_or_method_falls_back(tmp_path) -> None:
+    path = _write(tmp_path, {"devices": [{"id": "a", "name": "A", "local_key": "",
+                                          "source": "Keyboard", "method": "turbo"}]})
+    dev = config_mod.load(path).devices[0]
+    assert dev.source == "keyboard" and dev.method == "auto"

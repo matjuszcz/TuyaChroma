@@ -504,12 +504,14 @@ class BulbWorker(threading.Thread):
                 if self.use_music:
                     # music data is never answered: the heartbeat is what notices a
                     # light that hung (error 914)
+                    self._drain()  # (music colors are never waited for: their acks pile up)
                     check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
                 else:
                     # colors are confirmed anyway; a waited heartbeat's empty answer
                     # made tinytuya wait the whole timeout (colors froze ~0.4 s every
                     # 8 s). Its answer is drained before the next waited command.
                     self._dev.heartbeat(nowait=True)
+                    self._drain()  # keep the queue short (idle, hold and scenes read nothing)
                 last_beat = now
             capture = self._capture
             if capture is not None:
@@ -664,8 +666,14 @@ class BulbWorker(threading.Thread):
         sock = getattr(dev, "socket", None)
         if sock is None or not hasattr(dev, "receive"):
             return
+        # tinytuya waits for a second message after an empty answer (an ack):
+        # here that would stall the color for the whole reply timeout
+        retry = getattr(dev, "retry", None)
+        if retry is not None:
+            dev.retry = False
         try:
-            for _ in range(20):
+            end = time.monotonic() + 0.2  # bounded by time, however much is queued
+            while time.monotonic() < end:
                 if not select.select([sock], [], [], 0)[0]:
                     return
                 dev.receive()
@@ -673,6 +681,9 @@ class BulbWorker(threading.Thread):
                     return  # tinytuya closed it (the light went away)
         except (OSError, ValueError):
             pass  # the next command finds out
+        finally:
+            if retry is not None:
+                dev.retry = retry
 
     def _remember_original(self) -> None:
         """Taking over: remember how HA / the Tuya app left the bulb, to give it

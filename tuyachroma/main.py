@@ -204,15 +204,16 @@ def main(argv: list[str] | None = None) -> int:
     if config.settings.sync_enabled:
         service.start(config)
 
-    resume_timer: list[threading.Timer] = []
-
     def on_resume() -> None:
-        # Give Wi-Fi a moment to come back before reconnecting to the bulbs.
-        if config.settings.sync_enabled:
-            timer = threading.Timer(8, lambda: service.start(config))
-            timer.daemon = True
-            resume_timer.append(timer)
-            timer.start()
+        # Give Wi-Fi a moment to come back before reconnecting to the bulbs
+        # (and check again then: control may have been paused meanwhile).
+        def start() -> None:
+            if config.settings.sync_enabled:
+                service.start(config)
+
+        timer = threading.Timer(8, start)
+        timer.daemon = True
+        timer.start()
 
     app_holder: list = []
 
