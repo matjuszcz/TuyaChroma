@@ -16,6 +16,7 @@ class FakeBulb:
         self.srv.bind(("127.0.0.1", 0)); self.srv.listen(5)
         self.port = self.srv.getsockname()[1]
         self.log = []; self.conns = 0; self.n = 0; self.clients = []
+        self.push_status = True  # False: acks only (GU10s getting colors quickly)
         threading.Thread(target=self._accept, daemon=True).start()
     def _accept(self):
         while True:
@@ -71,6 +72,7 @@ class FakeBulb:
                     ch = {k: v for k, v in obj.get("dps", {}).items() if self.dps.get(k) != v}
                     self.dps.update(ch)
                     self._send(c, 7, m.seqno, None)
-                    if ch: self._send(c, 8, 0, {"devId": "x", "dps": ch, "t": 1}, hdr=True)
+                    if ch and self.push_status:
+                        self._send(c, 8, 0, {"devId": "x", "dps": ch, "t": 1}, hdr=True)
                 elif m.cmd == 9:
                     self._send(c, 9, m.seqno, None)

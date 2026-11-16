@@ -29,7 +29,7 @@ while it runs.
 
 ## Commands
 - Tests (Linux needs xvfb for Tk): `xvfb-run -a python -m pytest -q`. Baseline:
-  321 passed, 11 skipped. Run it twice after changes (timing tests).
+  322 passed, 11 skipped. Run it twice after changes (timing tests).
 - Lint: `python -m pyflakes tuyachroma tests`
 - GUI screenshot: build a Tk app with test data under xvfb (see tests/test_app.py
   for how to construct `App`).
@@ -74,6 +74,9 @@ Other rules:
     before every color and after heartbeats (unread answers piling up likely hung
     RGB Biuro 2 with 914 in 1.9.18). `_drain()` turns off tinytuya's retry so an
     empty ack doesn't wait the whole reply timeout.
+  - The once-a-second confirmation is done at the light's first answer (its ack,
+    `_set_values(first_answer=True)`): GU10s getting colors quickly often send no
+    status message, and waiting for one cost the full 0.35 s each time (1.13.0 log).
   - tinytuya returns the FIRST waiting message as a waited call's reply (hence
     `_drain()`), and `_set_values()` resets tinytuya's sticky single-DP fallback
     (`max_simultaneous_dps`).

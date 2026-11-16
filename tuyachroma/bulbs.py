@@ -241,6 +241,7 @@ class BulbWorker(threading.Thread):
         self._resend_full = False  # the light lost our mode: send switch + mode with the color
         self._connect_dps: dict = {}
         self._no_ack_streak = 0
+        self._no_ack_warned = False
         self._connected_at = 0.0
 
     # ------------------------------------------------------------ public API
@@ -632,7 +633,11 @@ class BulbWorker(threading.Thread):
             self._last_probe = now
             self._drain()  # so the answer read is this color's, not an older one
             started = time.perf_counter()
-            check_reply(self._set_values(values), "color")
+            # The light's first answer (its ack) confirms the color; tinytuya would
+            # also wait for a status message, which GU10s getting colors quickly
+            # often skip: every confirmation then took the whole reply timeout
+            # (1.13.0 log: "not confirmed, waited ~400 ms" every few seconds).
+            check_reply(self._set_values(values, first_answer=True), "color")
         self._last_value = value_key
         self._resend_full = False
         took = (time.perf_counter() - started) * 1000
@@ -640,10 +645,12 @@ class BulbWorker(threading.Thread):
             # No confirmation, only the timeout (seen with music data on GU10 bulbs):
             # that is not the light's delay - don't send effects 3 s ahead for it.
             self._no_ack_streak += 1
-            if self._no_ack_streak >= 3 and not self.no_ack:
+            if self._no_ack_streak >= 3 and not self._no_ack_warned:
+                self._no_ack_warned = True  # once: it isn't news the next time
                 _LOGGER.warning("%s: colors are not confirmed (waited %.0f ms) in %s mode%s",
                                 self.cfg.name, took, "music" if self.use_music else "colour",
                                 " - choose 'Automatycznie'" if self.use_music else "")
+            if self._no_ack_streak >= 3:
                 self.no_ack = True
         else:
             self._no_ack_streak = 0
@@ -654,13 +661,21 @@ class BulbWorker(threading.Thread):
         self._sent = rgb
         self._send_count += 1
 
-    def _set_values(self, values: dict, nowait: bool = False):
+    def _set_values(self, values: dict, nowait: bool = False, first_answer: bool = False):
         """set_multiple_values, always as one command: after one failed write
-        tinytuya splits every later one into single values with 1 s pauses."""
+        tinytuya splits every later one into single values with 1 s pauses.
+        ``first_answer``: done at the light's first answer (an empty ack too)."""
         dev = self._dev
         if getattr(dev, "max_simultaneous_dps", 0):
             dev.max_simultaneous_dps = 0
-        return dev.set_multiple_values(values, nowait=nowait)
+        retry = getattr(dev, "retry", None)
+        if first_answer and retry is not None:
+            dev.retry = False
+        try:
+            return dev.set_multiple_values(values, nowait=nowait)
+        finally:
+            if first_answer and retry is not None:
+                dev.retry = retry
 
     def _drain(self) -> None:
         """Read what's waiting on the connection (answers to colors sent without

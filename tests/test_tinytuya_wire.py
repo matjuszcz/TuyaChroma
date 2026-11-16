@@ -172,3 +172,21 @@ def test_answers_to_unconfirmed_colors_never_pile_up() -> None:
     sends = [t for t, c, d in fake.log if c == 7 and d and "24" in d]
     gaps = [b - a for a, b in zip(sends[3:], sends[4:])]
     assert sum(gaps) / len(gaps) < 0.2  # at its rate (0.15 s), not rate + reply time
+
+
+def test_ack_without_a_status_message_confirms_quickly() -> None:
+    """GU10s getting colors quickly answer with an ack but often no status message:
+    the confirmation must not wait the whole reply timeout (1.13.0 log)."""
+    fake = FakeBulb(delay=0.03)
+    fake.push_status = False
+    w = _worker(fake)
+    w.start()
+    try:
+        t0 = time.monotonic()
+        w.set_color_source(lambda: (int((time.monotonic() - t0) * 300) % 256, 40, 0), key=1)
+        time.sleep(3.0)
+        assert not w.no_ack
+        assert w.latency_ms is not None and w.latency_ms < 200
+    finally:
+        w.stop(5)
+        fake.close()
