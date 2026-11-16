@@ -378,14 +378,22 @@ def parse(device: str, raw: bytes) -> Frame | None:
     if len(raw) < C.sizeof(spec.struct):
         raise ValueError(f"{device}: need {C.sizeof(spec.struct)} bytes, got {len(raw)}")
     obj = spec.struct.from_buffer_copy(raw[: C.sizeof(spec.struct)])
-    if obj.write_index == 0:
-        return None
+    # write_index is the next slot to write: 0 also means the ring just wrapped
+    # (the newest frame is then in slot 9); empty only if slot 9 was never written.
     newest = (obj.write_index - 1) % RING
+    if obj.write_index == 0 and obj.data[newest].effect_type == 0 \
+            and obj.data[newest].timestamp.ticks == 0:
+        return None
     data = obj.data[newest]
     if data.effect_type in CONTINUING:
         # a control message on top: the frame before it is what the device shows
+        # (Resume after Suspend: the effect from before the Suspend is back)
+        skip_suspend = data.effect_type == EFFECT_RESUME
         for back in range(1, RING):
             older = obj.data[(newest - back) % RING]
+            if older.effect_type == EFFECT_SUSPEND and skip_suspend:
+                skip_suspend = False
+                continue
             if older.effect_type in ENDING:
                 break
             if older.effect_type not in CONTINUING:

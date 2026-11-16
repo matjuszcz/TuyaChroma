@@ -183,6 +183,8 @@ class Renderer:
         stars: dict[int, tuple[float, RGB]] = self._state.setdefault(target, {})
         life = p.period * 0.8
         n = w * h
+        for i in [i for i in stars if i >= n]:  # a light removed: the strip got shorter
+            del stars[i]
         expected = p.density * 0.06 * n * dt / max(0.2, life / 2)
         spawn = int(expected) + (1 if self._rng.random() < expected % 1 else 0)
         x0, aw, y0, ah = self._area(target, w, h)
@@ -201,6 +203,8 @@ class Renderer:
 
     def _fx_fire(self, target, w, h, t, dt) -> list[RGB]:
         heat: list[float] = self._state.setdefault(target, [0.0] * (w * h))
+        if len(heat) != w * h:  # e.g. a light added: the strip got longer
+            heat = self._state[target] = [0.0] * (w * h)
         steps = max(1, int(dt * (6 + 2 * self.profile.speed)))
         for _ in range(min(steps, 5)):
             for x in range(w):  # bottom row: new sparks

@@ -121,3 +121,22 @@ def test_ending_message_means_no_effect() -> None:
     obj = razer.DEVICES["keyboard"].struct.from_buffer_copy(_with_newest("keyboard", 9, razer.EFFECT_ACTIVE))
     obj.data[8].effect_type = razer.EFFECT_SUSPEND
     assert not razer.parse("keyboard", bytes(obj)).active
+
+
+def test_wrapped_ring_reads_slot_nine() -> None:
+    """write_index 0 after 10 writes: the newest frame is in slot 9, not "nothing"."""
+    obj = razer.DEVICES["keyboard"].struct.from_buffer_copy(dump("keyboard", write_index=9))
+    obj.data[9] = obj.data[8]
+    obj.write_index = 0
+    frame = razer.parse("keyboard", bytes(obj))
+    assert frame is not None and frame.active
+    empty = razer.DEVICES["keyboard"].struct()
+    assert razer.parse("keyboard", bytes(empty)) is None  # never written
+
+
+def test_resume_after_suspend_shows_the_effect_again() -> None:
+    obj = razer.DEVICES["keyboard"].struct.from_buffer_copy(_with_newest("keyboard", 9, razer.EFFECT_RESUME))
+    obj.data[8].effect_type = razer.EFFECT_SUSPEND
+    obj.data[7] = razer.DEVICES["keyboard"].struct.from_buffer_copy(dump("keyboard")).data[8]
+    frame = razer.parse("keyboard", bytes(obj))
+    assert frame.active and frame.effect_type == razer.EFFECT_CUSTOM

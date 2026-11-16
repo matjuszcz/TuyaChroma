@@ -68,8 +68,16 @@ class EffectPlayer(threading.Thread):
             while not self._stop_event.is_set():
                 started = time.monotonic()
                 t = started
-                frames = {d: self.renderer.device_frame(d, t) for d in DEVICES}
-                strip = self.renderer.strip(self.bulb_count, t)
+                try:
+                    frames = {d: self.renderer.device_frame(d, t) for d in DEVICES}
+                    strip = self.renderer.strip(self.bulb_count, t)
+                except Exception:  # noqa: BLE001 - a renderer bug must not freeze the devices
+                    if not getattr(self, "_render_failed", False):
+                        _LOGGER.exception("Effect rendering failed - retrying")
+                    self._render_failed = True
+                    self._stop_event.wait(self._period)
+                    continue
+                self._render_failed = False
                 with self._lock:
                     self._frames, self._strip = frames, strip
                 if self._factory is not None and self.yielded:

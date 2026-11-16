@@ -164,8 +164,13 @@ RECLAIM_TRIES = 5  # games may show effects only after loading
 
 def is_game_active(frames: dict[str, Frame | None], apps: ChromaApps | None,
                    own_pid: int, full_sync: bool,
-                   alive: Callable[[int], bool] | None = None) -> bool:
-    """Does a game (another Chroma app) control the lighting right now?"""
+                   alive: Callable[[int], bool] | None = None,
+                   current_known: bool = False) -> bool:
+    """Does a game (another Chroma app) control the lighting right now?
+
+    ``current_known``: Synapse has named its current app before, so "no
+    current app" means its own profile, not an older Synapse without that field.
+    """
     any_active = any(f is not None and f.active for f in frames.values())
     if not any_active:
         return False
@@ -175,6 +180,8 @@ def is_game_active(frames: dict[str, Frame | None], apps: ChromaApps | None,
         # Synapse shows another app's effect - unless that app is gone (a game
         # that crashed stays "current" with its last frame in the memory)
         return alive is None or alive(apps.current_pid)
+    if apps is not None and current_known:
+        return False  # Synapse shows its own profile: what's in the memory is an old frame
     # No app list: in full sync our own effect is in the frames, so we can't tell.
     return not full_sync
 
@@ -724,6 +731,7 @@ class SyncService:
         self.other_apps = {}
         not_ours_since: float | None = None
         last_shown: int | None = None  # which app Synapse shows (logged on change)
+        current_known = False  # has Synapse ever named its current app?
         last_reclaim = 0.0
         reclaim_tries = 0
         try:
@@ -802,7 +810,9 @@ class SyncService:
                     if self.player is not None:
                         # Full sync: a game is running - hand it the Razer devices.
                         self.player.yielded = full_sync and bool(games)
-                    raw_game = is_game_active(frames, apps, self._own_pid, full_sync, alive)
+                    current_known = current_known or bool(apps is not None and apps.current_pid)
+                    raw_game = is_game_active(frames, apps, self._own_pid, full_sync, alive,
+                                              current_known)
                     if raw_game:
                         game_seen = now
                         held_name = apps.current_name if apps else ""

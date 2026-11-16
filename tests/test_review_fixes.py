@@ -193,3 +193,39 @@ def test_slow_loading_game_gets_the_devices_after_probation(monkeypatch) -> None
             time.sleep(0.02)
     finally:
         service.stop()
+
+
+def test_fire_and_starlight_survive_a_changing_number_of_lights() -> None:
+    for effect in ("fire", "starlight"):
+        rend = Renderer(Profile(effect=effect, speed=10, density=10))
+        for count, t in ((2, 1.0), (5, 1.1), (1, 1.2), (4, 1.3)):
+            assert len(rend.strip(count, t)) == count
+
+
+def test_player_keeps_running_when_rendering_fails(monkeypatch) -> None:
+    rend = Renderer(Profile())
+    calls = {"n": 0}
+    real = rend.device_frame
+
+    def flaky(device, t):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise IndexError("renderer bug")
+        return real(device, t)
+
+    monkeypatch.setattr(rend, "device_frame", flaky)
+    player = EffectPlayer(rend, 1, output_factory=None, fps=20)
+    player.start()
+    try:
+        end = time.time() + 2
+        while time.time() < end and not player.latest()[0]:
+            time.sleep(0.02)
+        assert player.is_alive() and player.latest()[0]
+    finally:
+        player.stop()
+
+
+def test_stale_frame_is_not_a_game_when_synapse_shows_its_profile() -> None:
+    none = ChromaApps(current_pid=0, apps={OWN: "x.exe"})
+    assert engine.is_game_active(_frames(True), none, OWN, False)  # old Synapse: can't tell
+    assert not engine.is_game_active(_frames(True), none, OWN, False, current_known=True)
