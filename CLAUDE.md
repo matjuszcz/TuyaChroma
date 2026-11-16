@@ -89,8 +89,11 @@ Other rules:
   - The live color strip paints every 250 ms, only while the window is shown.
   - Tray via pystray. Error hooks log everything.
   - `new_tk_root` retries Tcl init.
-- `theme.py`: clam-based palette. Only the lights' colors and status colors are
-  colorful.
+- `theme.py`: clam-based dark (graphite) and light palettes; `use()` picks one
+  (setting "theme": auto follows Windows). Only the lights and status colors are
+  colorful. The header strip draws glowing rounded pills (`rounded_rect`, `mix`).
+  Windows dark title bar via DWM. The layout must fit a 600 px high window
+  (test_buttons_visible_in_every_tab).
 - `main.py`: entry point, error logging, relaunch after update, self-test.
 
 ## Known gotchas

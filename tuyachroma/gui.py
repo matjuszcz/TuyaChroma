@@ -80,6 +80,7 @@ SPEED_LABELS = {
     1.0: "bardzo wolno – 1 zmiana/s",
 }
 RAZER_GREEN = "#44d62c"
+THEME_LABELS = {"auto": "jak w Windows", "dark": "ciemny", "light": "jasny"}
 
 
 def _status_tag(status: str) -> str:
@@ -135,7 +136,7 @@ class App:
         # Sizes below are for 100% scaling; grow them on high-DPI screens.
         self.scale = max(1.0, self.root.winfo_fpixels("1i") / 96)
         width = min(self.px(900), self.root.winfo_screenwidth() - 40)
-        height = min(self.px(600), self.root.winfo_screenheight() - 80)
+        height = min(self.px(720), self.root.winfo_screenheight() - 80)
         self.root.geometry(f"{width}x{height}")
         self.root.minsize(self.px(760), self.px(480))
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -232,40 +233,44 @@ class App:
     # ---------------------------------------------------------------- layout
 
     def _build(self) -> None:
+        theme.use(getattr(self.config.settings, "theme", "auto"))
         self.fonts = theme.apply(self.root, self.scale)
 
-        top = ttk.Frame(self.root, padding=(self.px(14), self.px(10), self.px(14), self.px(6)))
+        top = ttk.Frame(self.root, padding=(self.px(18), self.px(12), self.px(18), 0))
         top.pack(fill="x")
         ttk.Label(top, text="TuyaChroma", style="Header.TLabel").pack(side="left")
-        self.sync_button = ttk.Button(top, command=self.toggle_sync)
+        status = ttk.Frame(top)
+        status.pack(side="left", padx=(self.px(16), 0), pady=(self.px(5), 0))
+        self.dot = tk.Canvas(status, width=self.px(10), height=self.px(10), highlightthickness=0,
+                             background=theme.CANVAS)
+        self.dot.pack(side="left", padx=(self.px(1), self.px(7)))
+        self.status_var = tk.StringVar()
+        ttk.Label(status, textvariable=self.status_var, foreground=theme.MUTED).pack(side="left")
+        self.sync_button = ttk.Button(top, command=self.toggle_sync, style="Accent.TButton")
         self.sync_button.pack(side="right")
         self.update_button = ttk.Button(top, command=self.install_update)  # shown when available
-        self.dot = tk.Canvas(top, width=self.px(14), height=self.px(14), highlightthickness=0,
-                             background=theme.CANVAS)
-        self.dot.pack(side="left", padx=(self.px(14), self.px(6)))
-        self.status_var = tk.StringVar()
-        ttk.Label(top, textvariable=self.status_var).pack(side="left")
 
-        # The live strip: every light controlled by Razer, in the color it shows now.
-        self.strip = tk.Canvas(self.root, height=self.px(26), highlightthickness=0,
+        # The live strip: every light controlled by Razer, glowing in the color it shows now.
+        self.strip = tk.Canvas(self.root, height=self.px(44), highlightthickness=0,
                                background=theme.CANVAS)
-        self.strip.pack(fill="x", padx=self.px(14), pady=(0, self.px(8)))
+        self.strip.pack(fill="x", padx=self.px(10), pady=(self.px(4), self.px(2)))
         self.strip.bind("<Configure>", lambda _e: self._paint_strip())
 
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+        self.notebook.pack(fill="both", expand=True, padx=self.px(16), pady=(0, self.px(4)))
         self._build_bulbs_tab()
         self._build_account_tab()
         self._build_razer_tab()
         self._build_profiles_tab()
         self._build_settings_tab()
 
-        bottom = ttk.Frame(self.root, padding=(self.px(14), 0, self.px(14), self.px(8)))
+        bottom = ttk.Frame(self.root, padding=(self.px(18), 0, self.px(18), self.px(10)))
         bottom.pack(fill="x")
         self.busy_var = tk.StringVar()
         ttk.Label(bottom, textvariable=self.busy_var, style="Muted.TLabel").pack(side="left")
         ttk.Label(bottom, text=f"v{__version__}", style="Muted.TLabel").pack(side="right")
         self.root.after(250, self._strip_loop)
+        theme.dark_title_bar(self.root)
 
     # ------------------------------------------------------------ live strip
 
@@ -286,43 +291,64 @@ class App:
             self.root.after(250, self._strip_loop)
 
     def _paint_strip(self) -> None:
-        """One field per light in the color it shows; grey with its state otherwise."""
+        """One glowing pill per light in the color it shows; grey with its name otherwise."""
         canvas = self.strip
         canvas.delete("all")
         lights = self.config.enabled_devices
         width, height = canvas.winfo_width(), int(canvas.cget("height"))
-        if width < 20:
+        if width < 40:
             return  # not laid out yet
+        glow = self.px(8)  # room for the light's glow around its pill
         if not lights:
-            canvas.create_text(0, height // 2, anchor="w", fill=theme.MUTED, font=self.fonts["small"],
+            theme.rounded_rect(canvas, glow, glow, width - glow, height - glow, self.px(14),
+                               fill=theme.CANVAS, outline=theme.LINE, dash=(4, 3))
+            canvas.create_text(width / 2, height / 2, fill=theme.MUTED, font=self.fonts["small"],
                                text="Światła sterowane przez Razer pojawią się tutaj – zaznacz je "
                                     "w zakładce Światła.")
             return
         colors = self.service.bulb_colors()
-        gap = self.px(6)
-        field = (width - gap * (len(lights) - 1)) / len(lights)
+        gap = self.px(10)
+        field = (width - 2 * glow - gap * (len(lights) - 1)) / len(lights)
+        y0, y1 = glow, height - glow
+        radius = (y1 - y0) / 2
         for i, dev in enumerate(lights):
-            x0 = i * (field + gap)
+            x0 = glow + i * (field + gap)
+            x1 = x0 + field
             rgb = colors.get(dev.id)
+            label = {"text": dev.name, "font": self.fonts["pill"], "width": max(10, field - radius)}
             if rgb == "scene":  # the light plays its own effect: a band of hues
-                steps = max(1, int(field // self.px(4)))
+                hues = [tuple(round(c * 255) for c in colorsys.hsv_to_rgb(k / 6, 0.6, 1.0))
+                        for k in range(7)]
+                self._glow(x0, y0, x1, y1, radius, hues[0])
+                theme.rounded_rect(canvas, x0, y0, x1, y1, radius, fill=theme.hex_color(hues[0]),
+                                   outline="", tags="pill")
+                steps = max(1, int((field - radius) // self.px(3)))
                 for k in range(steps):
-                    hue = colorsys.hsv_to_rgb(k / steps, 0.65, 1.0)
-                    canvas.create_rectangle(x0 + k * field / steps, 0, x0 + (k + 1) * field / steps,
-                                            height - 1, width=0,
-                                            fill=theme.hex_color(tuple(round(c * 255) for c in hue)))
-                canvas.create_text(x0 + field / 2, height / 2, text=dev.name, fill=theme.INK,
-                                   font=self.fonts["small"], width=max(10, field - self.px(8)))
-                continue
-            fill = theme.hex_color(rgb) if rgb else theme.SURFACE
-            ink = theme.readable_on(rgb) if rgb else theme.MUTED
-            canvas.create_rectangle(x0, 0, x0 + field, height - 1, fill=fill,
-                                    outline=fill if rgb else theme.LINE)
-            canvas.create_text(x0 + field / 2, height / 2, text=dev.name, fill=ink,
-                               font=self.fonts["small"], width=max(10, field - self.px(8)))
+                    hue = colorsys.hsv_to_rgb(k / steps, 0.6, 1.0)
+                    canvas.create_rectangle(
+                        x0 + radius / 2 + k * (field - radius) / steps, y0,
+                        x0 + radius / 2 + (k + 1) * (field - radius) / steps + 1, y1, width=0,
+                        fill=theme.hex_color(tuple(round(c * 255) for c in hue)))
+                canvas.create_text((x0 + x1) / 2, height / 2, fill="#15181E", **label)
+            elif rgb:
+                self._glow(x0, y0, x1, y1, radius, rgb)
+                theme.rounded_rect(canvas, x0, y0, x1, y1, radius, fill=theme.hex_color(rgb),
+                                   outline="", tags="pill")
+                canvas.create_text((x0 + x1) / 2, height / 2, fill=theme.readable_on(rgb), **label)
+            else:  # not showing our colors (off, offline, starting)
+                theme.rounded_rect(canvas, x0, y0, x1, y1, radius, fill=theme.SURFACE,
+                                   outline=theme.LINE, tags="pill")
+                canvas.create_text((x0 + x1) / 2, height / 2, fill=theme.MUTED, **label)
+
+    def _glow(self, x0: float, y0: float, x1: float, y1: float, radius: float, rgb) -> None:
+        """A soft halo of the light's color around its pill."""
+        for step, fade in ((3, 0.9), (2, 0.8), (1, 0.66)):
+            grow = step * self.px(2.5)
+            theme.rounded_rect(self.strip, x0 - grow, y0 - grow, x1 + grow, y1 + grow, radius + grow,
+                               fill=theme.mix(rgb, theme.CANVAS, fade), outline="")
 
     def _build_bulbs_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
+        tab = ttk.Frame(self.notebook, padding=(8, 6, 8, 4))
         self.notebook.add(tab, text="Światła")
 
         ttk.Label(tab, text="Światła RGB z Twojego konta. Zaznacz te, którymi ma sterować Razer (kolumna ✓)."
@@ -355,8 +381,8 @@ class App:
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._on_tree_select())
 
-        self.editor = ttk.LabelFrame(tab, text="Ustawienia światła", padding=10)
-        self.editor.pack(fill="x", pady=(8, 0))
+        self.editor = ttk.LabelFrame(tab, text="Ustawienia światła", padding=(10, 6, 10, 8))
+        self.editor.pack(fill="x", pady=(6, 0))
         self.ed_enabled = tk.BooleanVar()
         self.ed_source = tk.StringVar()
         self.ed_zone = tk.StringVar()
@@ -375,24 +401,24 @@ class App:
         ttk.Label(self.editor, text="Strefa:").grid(row=0, column=3, sticky="e", padx=(10, 4))
         ttk.Combobox(self.editor, textvariable=self.ed_zone, state="readonly", width=12,
                      values=[ZONE_LABELS[z] for z in ZONES]).grid(row=0, column=4, sticky="w")
-        ttk.Label(self.editor, text="IP:").grid(row=1, column=1, sticky="e", padx=(10, 4), pady=(8, 0))
-        ttk.Entry(self.editor, textvariable=self.ed_ip, width=16).grid(row=1, column=2, sticky="w", pady=(8, 0))
-        ttk.Label(self.editor, text="Wersja:").grid(row=1, column=3, sticky="e", padx=(10, 4), pady=(8, 0))
+        ttk.Label(self.editor, text="IP:").grid(row=1, column=1, sticky="e", padx=(10, 4), pady=(6, 0))
+        ttk.Entry(self.editor, textvariable=self.ed_ip, width=16).grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Label(self.editor, text="Wersja:").grid(row=1, column=3, sticky="e", padx=(10, 4), pady=(6, 0))
         ttk.Combobox(self.editor, textvariable=self.ed_version, width=6,
-                     values=["", "3.1", "3.3", "3.4", "3.5"]).grid(row=1, column=4, sticky="w", pady=(8, 0))
-        ttk.Label(self.editor, text="Jasność %:").grid(row=2, column=1, sticky="e", padx=(10, 4), pady=(8, 0))
-        ttk.Scale(self.editor, from_=10, to=100, variable=self.ed_brightness, length=140).grid(row=2, column=2, sticky="w", pady=(8, 0))
-        ttk.Label(self.editor, text="Tryb:").grid(row=2, column=3, sticky="e", padx=(10, 4), pady=(8, 0))
+                     values=["", "3.1", "3.3", "3.4", "3.5"]).grid(row=1, column=4, sticky="w", pady=(6, 0))
+        ttk.Label(self.editor, text="Jasność %:").grid(row=2, column=1, sticky="e", padx=(10, 4), pady=(6, 0))
+        ttk.Scale(self.editor, from_=10, to=100, variable=self.ed_brightness, length=140).grid(row=2, column=2, sticky="w", pady=(6, 0))
+        ttk.Label(self.editor, text="Tryb:").grid(row=2, column=3, sticky="e", padx=(10, 4), pady=(6, 0))
         ttk.Combobox(self.editor, textvariable=self.ed_method, state="readonly", width=30,
-                     values=list(METHOD_LABELS.values())).grid(row=2, column=4, sticky="w", pady=(8, 0))
-        ttk.Label(self.editor, text="Korekta (ms):").grid(row=3, column=1, sticky="e", padx=(10, 4), pady=(8, 0))
+                     values=list(METHOD_LABELS.values())).grid(row=2, column=4, sticky="w", pady=(6, 0))
+        ttk.Label(self.editor, text="Korekta (ms):").grid(row=3, column=1, sticky="e", padx=(10, 4), pady=(6, 0))
         ttk.Spinbox(self.editor, from_=-1000, to=1000, increment=50, textvariable=self.ed_latency,
-                    width=7).grid(row=3, column=2, sticky="w", pady=(8, 0))
+                    width=7).grid(row=3, column=2, sticky="w", pady=(6, 0))
         ttk.Label(self.editor, text="(+ gdy się spóźnia)",
-                  foreground=theme.MUTED).grid(row=3, column=3, columnspan=2, sticky="w", padx=(10, 0), pady=(8, 0))
-        ttk.Label(self.editor, text="Szybkość zmian:").grid(row=4, column=1, sticky="e", padx=(10, 4), pady=(8, 0))
+                  foreground=theme.MUTED).grid(row=3, column=3, columnspan=2, sticky="w", padx=(10, 0), pady=(6, 0))
+        ttk.Label(self.editor, text="Szybkość zmian:").grid(row=4, column=1, sticky="e", padx=(10, 4), pady=(6, 0))
         ttk.Combobox(self.editor, textvariable=self.ed_speed, state="readonly", width=34,
-                     values=list(SPEED_LABELS.values())).grid(row=4, column=2, columnspan=3, sticky="w", pady=(8, 0))
+                     values=list(SPEED_LABELS.values())).grid(row=4, column=2, columnspan=3, sticky="w", pady=(6, 0))
         # Choices are saved as soon as they change (typed fields: IP, version and
         # correction with "Zapisz", so a half-typed value isn't applied).
         self._editor_dev_id: str | None = None
@@ -440,14 +466,14 @@ class App:
         ttk.Button(row, text="Pokaż kod QR", command=self.start_login).pack(side="left")
         ttk.Button(row, text="Wyloguj (usuń zapisane logowanie)", command=self.logout).pack(side="left", padx=12)
         self.login_var = tk.StringVar()
-        ttk.Label(tab, textvariable=self.login_var, foreground="#555").pack(anchor="w", pady=(10, 6))
+        ttk.Label(tab, textvariable=self.login_var, foreground=theme.MUTED).pack(anchor="w", pady=(10, 6))
         self.qr_label = ttk.Label(tab)
         self.qr_label.pack(anchor="w")
         self._update_account_label()
 
     def _scrollable(self, parent):
         """A frame that scrolls vertically when its content is taller than the window."""
-        canvas = tk.Canvas(parent, highlightthickness=0, borderwidth=0)
+        canvas = tk.Canvas(parent, highlightthickness=0, borderwidth=0, background=theme.CANVAS)
         bar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         inner = ttk.Frame(canvas, padding=(16, 12, 16, 12))
         window = canvas.create_window((0, 0), window=inner, anchor="nw")
@@ -490,7 +516,15 @@ class App:
         ttk.Checkbutton(tab, text="Uruchamiaj razem z Windows (przejmuj żarówki po włączeniu komputera)",
                         variable=self.set_autostart).pack(anchor="w")
         ttk.Checkbutton(tab, text="Startuj zminimalizowany do zasobnika (obok zegara)",
-                        variable=self.set_minimized).pack(anchor="w", pady=(4, 12))
+                        variable=self.set_minimized).pack(anchor="w", pady=(4, 0))
+        row = ttk.Frame(tab)
+        row.pack(anchor="w", pady=(8, 12))
+        ttk.Label(row, text="Wygląd okna:").pack(side="left")
+        self.set_theme = tk.StringVar(value=THEME_LABELS.get(s.theme, THEME_LABELS["auto"]))
+        ttk.Combobox(row, textvariable=self.set_theme, state="readonly", width=22,
+                     values=list(THEME_LABELS.values())).pack(side="left", padx=6)
+        ttk.Label(row, text="(zmiana po ponownym otwarciu programu)",
+                  foreground=theme.MUTED).pack(side="left")
         ttk.Label(tab, text="Gdy Razer działa, ale żadna gra nie wysyła efektów Chroma:").pack(anchor="w")
         for mode in IDLE_MODES:
             ttk.Radiobutton(tab, text=IDLE_LABELS[mode], value=mode, variable=self.set_idle).pack(anchor="w", padx=12)
@@ -613,8 +647,8 @@ class App:
             self.pf_swatches.append(sw)
         ttk.Button(right, text="Zapisz profil", command=self.save_profile).pack(anchor="w", pady=(6, 8))
         ttk.Label(right, text="Podgląd (klawiatura, mysz, podkładka, słuchawki, keypad, Chroma Link, żarówki):",
-                  foreground="#555").pack(anchor="w")
-        self.preview = tk.Canvas(right, width=self.px(470), height=self.px(150), background="#111",
+                  foreground=theme.MUTED).pack(anchor="w")
+        self.preview = tk.Canvas(right, width=self.px(470), height=self.px(150), background=theme.PREVIEW,
                                  highlightthickness=0)
         self.preview.pack(anchor="w", pady=(4, 0))
         self._preview_renderer = Renderer(self.config.settings.profile, seed=1)
@@ -1118,7 +1152,7 @@ class App:
         ttk.Button(bar, text="Odśwież listę", command=self.refresh_razer_devices).pack(side="right")
         ttk.Button(bar, text="Aktualizuj bazę urządzeń", command=lambda: self.update_device_db(manual=True)).pack(side="right", padx=6)
         self.db_info = tk.StringVar()
-        ttk.Label(tab, textvariable=self.db_info, foreground="#555").pack(anchor="w")
+        ttk.Label(tab, textvariable=self.db_info, foreground=theme.MUTED).pack(anchor="w")
         self._show_db_info()
         cols = ("name", "type", "conn", "sdk", "note")
         self.razer_tree = ttk.Treeview(tab, columns=cols, show="headings", height=10)
@@ -1639,6 +1673,7 @@ class App:
         before = {k: getattr(s, k) for k in self.RESTART_SETTINGS}
         s.autostart = self.set_autostart.get()
         s.start_minimized = self.set_minimized.get()
+        s.theme = next((k for k, v in THEME_LABELS.items() if v == self.set_theme.get()), "auto")
         s.idle = self.set_idle.get()
         try:
             s.fps = max(5, min(60, int(self.set_fps.get())))
@@ -1699,7 +1734,7 @@ class App:
             color = {"ok": theme.OK, "error": theme.ERROR}.get(self.service.status_level(), theme.WARN)
         self.status_var.set(text)
         self.dot.delete("all")
-        d = self.px(14)
+        d = self.px(10)
         self.dot.create_oval(1, 1, d - 2, d - 2, fill=color, outline=color)
         self.sync_button.configure(text="Wstrzymaj sterowanie" if s.sync_enabled else "Włącz sterowanie")
         self.refresh_devices()

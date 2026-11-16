@@ -98,6 +98,7 @@ class Settings:
     fps: float = 20
     sync_enabled: bool = True
     config_rev: int = 2  # one-time migrations of saved settings (files without it: 0)
+    theme: str = "auto"  # window look: auto (like Windows) | dark | light
 
     @property
     def profile(self) -> Profile:
@@ -233,6 +234,8 @@ def load(path: Path | None = None) -> AppConfig:
         settings.effect_sync = "precise"
     if settings.keyboard_layout not in ("auto", "full", "tkl", "mini"):
         settings.keyboard_layout = "auto"
+    if settings.theme not in ("auto", "dark", "light"):
+        settings.theme = "auto"
     if settings.latency_mode not in ("auto", "manual", "off"):
         settings.latency_mode = "auto"
     settings.latency_ms = max(0, min(3000, int(settings.latency_ms)))

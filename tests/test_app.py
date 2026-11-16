@@ -1154,8 +1154,7 @@ def test_live_strip_shows_each_lights_color(tmp_path, monkeypatch) -> None:
         for _ in range(10):
             app.root.update()
         app._paint_strip()
-        fills = [app.strip.itemcget(i, "fill") for i in app.strip.find_all()
-                 if app.strip.type(i) == "rectangle"]
+        fills = [app.strip.itemcget(i, "fill") for i in app.strip.find_withtag("pill")]
         assert fills == ["#8c3cff", theme.SURFACE]  # only lights Razer controls; one off
         texts = [app.strip.itemcget(i, "text") for i in app.strip.find_all() if app.strip.type(i) == "text"]
         assert texts == ["RGB Biuro 1", "Light Bar"]
@@ -1181,7 +1180,8 @@ def test_live_strip_shows_each_lights_color(tmp_path, monkeypatch) -> None:
         for d in config.devices:
             d.enabled = False
         app._paint_strip()  # nothing selected: a hint instead
-        assert any("zaznacz" in app.strip.itemcget(i, "text") for i in app.strip.find_all())
+        assert any("zaznacz" in app.strip.itemcget(i, "text") for i in app.strip.find_all()
+                   if app.strip.type(i) == "text")
     finally:
         app.root.destroy()
 
@@ -1193,8 +1193,8 @@ def test_only_problems_are_colored_in_the_table() -> None:
     assert gui._status_tag("wyłączona / poza siecią") == "warn"
     assert gui._status_tag("błąd: no status from bulb") == "err"
     assert gui._status_tag("sterowana z HA") == "idle"
-    assert gui.theme.readable_on((255, 255, 0)) == gui.theme.INK      # dark text on yellow
-    assert gui.theme.readable_on((40, 0, 120)) == gui.theme.SURFACE   # light text on deep blue
+    assert gui.theme.readable_on((255, 255, 0)) == "#15181E"   # dark text on yellow
+    assert gui.theme.readable_on((40, 0, 120)) == "#FFFFFF"    # light text on deep blue
 
 
 @pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
