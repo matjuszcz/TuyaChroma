@@ -522,7 +522,8 @@ def test_full_sync_hands_razer_devices_to_a_game(monkeypatch) -> None:
         assert wait(lambda: any(c[0] == "CreateKeyboardEffect" for c in dll.calls))
         state["running"].add(77)  # the game starts; Synapse still shows our effect
         assert wait(lambda: ("UnInit",) in dll.calls)  # we let go of the Razer devices
-        assert service.player.yielded and "gra" in service.player.output_status
+        assert wait(lambda: service.player.output_status == "urządzenia Razer: steruje gra")
+        assert service.player.yielded
         state["current"] = 77  # now the game's effect is shown
         assert wait(lambda: workers[0].calls and workers[0].calls[-1] == (0, 255, 0))
         assert service.game_active
@@ -568,7 +569,7 @@ def test_background_chroma_app_does_not_block_full_sync(monkeypatch) -> None:
     service.start(config)
     try:
         end = time.time() + 2
-        while time.time() < end and not service.player.yielded:
+        while time.time() < end and "oddane grze" not in service.razer_status:
             time.sleep(0.01)
         assert service.player.yielded and "oddane grze" in service.razer_status  # on trial
         end = time.time() + 3

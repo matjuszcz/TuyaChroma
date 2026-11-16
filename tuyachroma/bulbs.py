@@ -234,6 +234,7 @@ class BulbWorker(threading.Thread):
         self._hold = False
         self._capture: tuple[threading.Event, dict] | None = None
         self._reported = False
+        self._resend_full = False  # the light lost our mode: send switch + mode with the color
         self._connected_at = 0.0
 
     # ------------------------------------------------------------ public API
@@ -420,7 +421,16 @@ class BulbWorker(threading.Thread):
         self._sent = None
         self._last_value = None  # unknown after (re)connecting: send in full
         self._scene_sent = None  # a light that rebooted lost its effect: send it again
-        # _in_sync_mode survives reconnects: the bulb may still show our color.
+        # _in_sync_mode survives reconnects: the bulb may still show our color -
+        # unless it came back switched off or in white mode (powered off and on
+        # at the wall, or it rebooted): then switch and mode are sent again.
+        if self._in_sync_mode:
+            values = status["dps"]
+            switch, mode = values.get(str(dev.dpset.get("switch"))), values.get(str(dev.dpset.get("mode")))
+            if switch is False or (mode is not None and mode not in ("colour", "music")):
+                self._resend_full = True
+                _LOGGER.info("%s: came back %s - switching it to colors again", self.cfg.name,
+                             "switched off" if switch is False else f"in {mode} mode")
         self.connected = True
         self.status = STATUS_SYNC if self._in_sync_mode else STATUS_READY
         _LOGGER.log(
@@ -530,7 +540,8 @@ class BulbWorker(threading.Thread):
             self._remember_original()
         scene_was_on = self._scene_sent is not None
         self._scene_sent = None
-        full = not self._in_sync_mode or scene_was_on
+        full = not self._in_sync_mode or scene_was_on or self._resend_full
+        self._resend_full = False
         hexval = tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])
         value_key = (self.use_music, self.transition, hexval)
         if not full and value_key == self._last_value:

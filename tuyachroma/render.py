@@ -227,8 +227,11 @@ class Renderer:
     def _recent_presses(self, t: float, life: float) -> list[tuple[int, int, float, RGB]]:
         while self._incoming:
             self._presses.append(self._incoming.popleft())
-        self._presses = [pr for pr in self._presses[-40:] if t - pr[2] < life]
-        return self._presses
+        # Bulbs render ahead of now: prune by the real clock (with room for that),
+        # so a bulb's future time never cuts the keyboard's own fade short.
+        ref = min(t, time.monotonic())
+        self._presses = kept = [pr for pr in self._presses[-40:] if ref - pr[2] < life + 1.0]
+        return [pr for pr in kept if t - pr[2] < life]
 
     def _fx_reactive(self, target, w, h, t, dt) -> list[RGB]:
         life = self.profile.period * 0.4

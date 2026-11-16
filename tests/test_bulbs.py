@@ -301,3 +301,27 @@ def test_bulb_that_dropped_off_stays_slower(monkeypatch) -> None:
         worker.stop(2)
     again = BulbWorker(worker.cfg, device_factory=lambda _cfg: FakeBulb())
     assert again.slow_interval >= 0.3  # a new worker (e.g. after changing settings) remembers
+
+
+def test_light_that_came_back_in_white_mode_gets_colors_again() -> None:
+    """Switched off and on at the wall: it comes back white; colors alone wouldn't show."""
+    bulb = FakeBulb(music=False)
+    cfg = BulbConfig(name="lamp", id="x", ip="1.2.3.4", local_key="k", min_interval=0.05)
+    worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
+    worker._in_sync_mode = True  # it was showing our colors before the reconnect
+    worker._connect()            # FakeBulb reports mode "white"
+    worker._send((255, 0, 0))
+    assert bulb.sent[-1][1].get("20") is True and bulb.sent[-1][1].get("21") == "colour"
+    worker._send((0, 255, 0))   # back to plain colors
+    assert "20" not in bulb.sent[-1][1]
+
+    class InColour(FakeBulb):
+        def status(self):
+            return {"dps": {"20": True, "21": "colour", "22": 500, "23": 0, "24": "000003e803e8"}}
+
+    bulb2 = InColour(music=False)
+    worker2 = BulbWorker(cfg, device_factory=lambda _cfg: bulb2)
+    worker2._in_sync_mode = True
+    worker2._connect()
+    worker2._send((255, 0, 0))
+    assert "20" not in bulb2.sent[-1][1]  # still in our mode: just the color

@@ -338,9 +338,9 @@ class SyncService:
         keyhook_factory: Callable[[Callable[[int, int], None]], Any] = KeyboardHook,
         screen_factory: Callable[[], Any] = ScreenSampler,
         own_pid: int | None = None,
-        layout_detector: Callable[[], str] = detect_keyboard_layout,
+        layout_detector: Callable[[], str] | None = None,
     ) -> None:
-        self._layout_detector = layout_detector
+        self._layout_detector = layout_detector or (lambda: detect_keyboard_layout())
         self.keyboard_layout = "full"
         self._reader_factory = reader_factory
         self._worker_factory = worker_factory
@@ -358,6 +358,7 @@ class SyncService:
         self.razer_status = "zatrzymane"
         self.razer_level = "warn"  # "ok" / "warn" / "error", set with every status
         self._settings = None
+        self._background_apps: set[int] = set()
         self.game_active = False
         self.game_name = ""
         self.other_apps: dict[int, str] = {}  # running Chroma apps treated as games
@@ -712,7 +713,9 @@ class SyncService:
         game_seen = 0.0                                  # last moment a game effect was seen
         held_name = ""
         on_trial: dict[int, float] = {}   # pid -> when we handed it the devices
-        background: set[int] = set()      # Chroma apps that never showed an effect
+        # Chroma apps that never showed an effect: kept across restarts, so an
+        # always-running app (e.g. Wallpaper Engine) isn't handed the devices again
+        background = self._background_apps
         self.other_apps = {}
         not_ours_since: float | None = None
         last_shown: int | None = None  # which app Synapse shows (logged on change)
@@ -778,6 +781,13 @@ class SyncService:
                             background.add(pid)
                             _LOGGER.info("%s shows no Chroma effect - a background app, taking the "
                                          "Razer devices back", others[pid])
+                    for pid in list(background):
+                        if current == pid and any_active:
+                            # a slow-loading game: its first effect came after the probation
+                            background.discard(pid)
+                            on_trial[pid] = float("inf")
+                            _LOGGER.info("%s shows a Chroma effect - a game after all, handing it "
+                                         "the Razer devices", others.get(pid, pid))
                     background &= set(others)
                     for pid in others if full_sync else []:
                         if pid not in on_trial and pid not in background:

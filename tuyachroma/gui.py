@@ -738,8 +738,9 @@ class App:
         save(self.config)
         if not self.config.settings.sync_enabled:
             return
-        if not self.service.apply_profile(self.config):
-            self.save_and_apply()
+        # off the window's thread: the service may be busy (e.g. a bulb going offline)
+        self.run_bg(lambda: self.service.apply_profile(self.config),
+                    lambda switched: switched or self.save_and_apply())
 
     def _preview_layout(self) -> str:
         setting = self.config.settings.keyboard_layout
@@ -1099,7 +1100,7 @@ class App:
             return f"{dev.name}: OK (protokół {version})"
         finally:
             save(self.config)
-            if was_running:
+            if was_running and self.config.settings.sync_enabled:  # not paused meanwhile
                 self.service.start(self.config)
 
     # -------------------------------------------------------- razer devices
