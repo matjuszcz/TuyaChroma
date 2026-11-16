@@ -183,6 +183,7 @@ def apply(root: tk.Tk, scale: float = 1.0) -> dict[str, tuple]:
                   indicatorbackground=[("pressed", SELECT), ("disabled", CANVAS)],
                   indicatorforeground=[("disabled", IDLE)])
     # Slider and scrollbar thumbs: clearly visible on their track (>= 3:1)
+    _check_indicator(root, style, max(13, round(15 * scale)))
     style.configure("Horizontal.TScale", background=IDLE, troughcolor=SURFACE, bordercolor=IDLE,
                     lightcolor=IDLE, darkcolor=IDLE, gripcount=0)
     style.map("Horizontal.TScale", background=[("active", MUTED)],
@@ -195,6 +196,45 @@ def apply(root: tk.Tk, scale: float = 1.0) -> dict[str, tuple]:
                   lightcolor=[("active", MUTED)], darkcolor=[("active", MUTED)])
     style.configure("TSeparator", background=LINE)
     return fonts
+
+
+def _box_image(root: tk.Misc, size: int, checked: bool) -> tk.PhotoImage:
+    """A checkbox drawn in the palette: a box, filled with a tick when checked."""
+    img = tk.PhotoImage(master=root, width=size, height=size)
+    fill = INK if checked else SURFACE
+    img.put(IDLE if not checked else INK, to=(0, 0, size, size))
+    img.put(fill, to=(1, 1, size - 1, size - 1))
+    if checked:
+        # a tick: down-right from the left, then up to the top right
+        pts = [(0.22, 0.52), (0.42, 0.72), (0.80, 0.30)]
+        thick = max(1, size // 8)
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            steps = size * 2
+            for k in range(steps + 1):
+                x = round((x0 + (x1 - x0) * k / steps) * (size - 1))
+                y = round((y0 + (y1 - y0) * k / steps) * (size - 1))
+                img.put(CANVAS, to=(max(0, x - thick // 2), max(0, y - thick // 2),
+                                    min(size, x + thick - thick // 2 + 1),
+                                    min(size, y + thick - thick // 2 + 1)))
+    return img
+
+
+def _check_indicator(root: tk.Misc, style: ttk.Style, size: int) -> None:
+    """Checkboxes with a tick (clam draws a cross, which reads as "off" on Windows)."""
+    try:
+        off, on = _box_image(root, size, False), _box_image(root, size, True)
+        name = f"tick{size}{'d' if DARK else 'l'}"
+        if name not in style.element_names():
+            style.element_create(name, "image", off, ("selected", on), border=0, sticky="w",
+                                 padding=(0, 0, max(4, size // 2), 0))  # room before the text
+        root._tc_check_images = (off, on)  # Tk keeps no reference of its own
+        style.layout("TCheckbutton", [("Checkbutton.padding", {"sticky": "nswe", "children": [
+            (name, {"side": "left", "sticky": ""}),
+            ("Checkbutton.focus", {"side": "left", "sticky": "w", "children": [
+                ("Checkbutton.label", {"sticky": "nswe"})]})]})])
+        style.configure("TCheckbutton", padding=(0, 2, 4, 2))
+    except tk.TclError:
+        pass  # the default indicator still works
 
 
 def _luminance(rgb) -> float:

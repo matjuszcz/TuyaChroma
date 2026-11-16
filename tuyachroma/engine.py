@@ -705,7 +705,7 @@ class SyncService:
 
     def _run(self, sources: list[str], settings) -> None:
         if not sources:
-            self._set_status("nie wybrano żadnej żarówki", "warn")
+            self._set_status("nie wybrano żadnego światła", "warn")
             return
         idle = settings.idle
         full_sync = idle == "full"
@@ -942,5 +942,5 @@ class SyncService:
                 return player.output_status, "error"  # e.g. Chroma Apps disabled in Synapse
             return f"pełna synchronizacja – profil „{profile_name}”", "ok"
         if idle == "effect":
-            return f"brak gry – profil „{profile_name}” na żarówkach", "ok"
+            return f"brak gry – profil „{profile_name}” na światłach", "ok"
         return "połączono, czekam na grę", "ok"

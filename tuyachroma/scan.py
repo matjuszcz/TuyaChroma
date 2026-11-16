@@ -21,7 +21,11 @@ def parse_broadcast(data: bytes) -> dict | None:
     if not isinstance(payload, dict):
         return None
     dev_id = payload.get("gwId") or payload.get("id")
-    if not dev_id or not payload.get("ip"):
+    if not isinstance(dev_id, str) or not dev_id or not isinstance(payload.get("ip"), str):
+        return None
+    try:
+        ipaddress.ip_address(payload["ip"])
+    except ValueError:
         return None
     version = str(payload.get("version") or "")
     if version not in VERSIONS:
@@ -59,14 +63,16 @@ def scan(seconds: float = 10.0) -> dict[str, dict]:
         pass
     found: dict[str, dict] = {}
     end = time.monotonic() + seconds
-    while time.monotonic() < end and socks:
+    try:
+        while time.monotonic() < end and socks:
+            for s in socks:
+                try:
+                    data, (sender, _port) = s.recvfrom(4096)
+                except (TimeoutError, socket.timeout, OSError):
+                    continue
+                if (info := parse_broadcast(data)) is not None and trusted(info, sender):
+                    found[info["id"]] = info
+    finally:
         for s in socks:
-            try:
-                data, (sender, _port) = s.recvfrom(4096)
-            except (TimeoutError, socket.timeout, OSError):
-                continue
-            if (info := parse_broadcast(data)) is not None and trusted(info, sender):
-                found[info["id"]] = info
-    for s in socks:
-        s.close()
+            s.close()
     return found

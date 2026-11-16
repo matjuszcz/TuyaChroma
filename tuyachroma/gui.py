@@ -37,9 +37,9 @@ ZONE_LABELS = {
     "top": "Góra", "bottom": "Dół",
 }
 IDLE_LABELS = {
-    "full": "Pełna synchronizacja: profil na wszystkich urządzeniach Razer i żarówkach (równo)",
-    "effect": "Profil tylko na żarówkach (Razer zostaje przy profilu z Synapse)",
-    "restore": "Oddaj żarówki do HA (stan sprzed przejęcia)",
+    "full": "Pełna synchronizacja: profil na wszystkich urządzeniach Razer i światłach (równo)",
+    "effect": "Profil tylko na światłach (Razer zostaje przy profilu z Synapse)",
+    "restore": "Oddaj światła do HA (stan sprzed przejęcia)",
     "keep": "Zostaw ostatni kolor z gry",
 }
 EFFECT_LABELS = {
@@ -68,8 +68,8 @@ LAYOUT_LABELS = {
 METHOD_LABELS = {
     "auto": "Automatycznie – płynnie (zalecane)",
     "colour": "Kolor – płynne przejścia",
-    "music": "Music – szybkie przejścia (może zawiesić żarówkę)",
-    "jump": "Natychmiast – bez przejść (może zawiesić żarówkę)",
+    "music": "Music – szybkie przejścia (może zawiesić światło)",
+    "jump": "Natychmiast – bez przejść (może zawiesić światło)",
 }
 # Device.min_interval (s between colors) -> label
 SPEED_LABELS = {
@@ -80,6 +80,7 @@ SPEED_LABELS = {
     1.0: "bardzo wolno – 1 zmiana/s",
 }
 RAZER_GREEN = "#44d62c"
+TAB_PADDING = (2, 8, 2, 4)  # tab content lines up with the title and the light strip
 THEME_LABELS = {"auto": "jak w Windows", "dark": "ciemny", "light": "jasny"}
 
 
@@ -257,7 +258,7 @@ class App:
         self.strip.bind("<Configure>", lambda _e: self._paint_strip())
 
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=self.px(16), pady=(0, self.px(4)))
+        self.notebook.pack(fill="both", expand=True, padx=self.px(18), pady=(0, self.px(4)))
         self._build_bulbs_tab()
         self._build_account_tab()
         self._build_razer_tab()
@@ -294,7 +295,7 @@ class App:
     def _paint_strip(self) -> None:
         """One glowing pill per light in the color it shows; grey with its name otherwise."""
         canvas = self.strip
-        lights = self.config.enabled_devices
+        lights = [d for d in self.config.devices if d.enabled]  # ticked (also those without an IP yet)
         width, height = canvas.winfo_width(), int(canvas.cget("height"))
         colors = self.service.bulb_colors() if lights else {}
         key = (width, height, tuple((d.id, d.name, colors.get(d.id)) for d in lights))
@@ -309,8 +310,8 @@ class App:
             theme.rounded_rect(canvas, glow, glow, width - glow, height - glow, self.px(14),
                                fill=theme.CANVAS, outline=theme.LINE, dash=(4, 3))
             canvas.create_text(width / 2, height / 2, fill=theme.MUTED, font=self.fonts["small"],
-                               text="Światła sterowane przez Razer pojawią się tutaj – zaznacz je "
-                                    "w zakładce Światła.")
+                               text="Tu pojawią się światła sterowane przez Razer – zaznacz je (✓) "
+                                    "w zakładce „Światła”.")
             return
         gap = self.px(10)
         field = (width - 2 * glow - gap * (len(lights) - 1)) / len(lights)
@@ -353,7 +354,7 @@ class App:
                                fill=theme.mix(rgb, theme.CANVAS, fade), outline="")
 
     def _build_bulbs_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=(8, 6, 8, 4))
+        tab = ttk.Frame(self.notebook, padding=TAB_PADDING)
         self.notebook.add(tab, text="Światła")
 
         ttk.Label(tab, text="Światła RGB z Twojego konta. Zaznacz te, którymi ma sterować Razer (kolumna ✓)."
@@ -373,15 +374,18 @@ class App:
         self.tree.configure(yscrollcommand=tree_bar.set)
         tree_bar.pack(side="right", fill="y")
         # Only problems get a color: a calm table where an off or broken light stands out.
-        for tag, color in (("ok", theme.INK), ("warn", theme.WARN), ("err", theme.ERROR), ("idle", theme.MUTED)):
+        # (a light that's off is marked in its state; only errors color the row)
+        for tag, color in (("ok", theme.INK), ("warn", theme.INK), ("err", theme.ERROR), ("idle", theme.MUTED)):
             self.tree.tag_configure(tag, foreground=color)
         for col, title, width in (
-            ("on", "✓", 36), ("name", "Nazwa", 180), ("ip", "IP", 110), ("version", "Wersja", 55),
-            ("source", "Źródło", 100), ("zone", "Strefa", 90), ("latency", "Opóźnienie", 80),
+            ("on", "✓", 32), ("name", "Nazwa", 150), ("ip", "IP", 105), ("version", "Wersja", 52),
+            ("source", "Źródło", 95), ("zone", "Strefa", 75), ("latency", "Opóźnienie", 78),
             ("status", "Stan", 200),
         ):
             self.tree.heading(col, text=title)
-            self.tree.column(col, width=self.px(width), anchor="center" if col in ("on", "version") else "w")
+            # the state is what matters most: it gets the room the window has
+            self.tree.column(col, width=self.px(width), stretch=col == "status",
+                             anchor="center" if col in ("on", "version") else "w")
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._on_tree_select())
@@ -398,7 +402,7 @@ class App:
         self.ed_latency = tk.IntVar(value=0)
         self.ed_speed = tk.StringVar(value=SPEED_LABELS[0.15])
         self.ed_use_scene = tk.BooleanVar(value=False)
-        self.ed_scene_info = tk.StringVar(value="")
+        self.ed_scene_info = tk.StringVar(value="Zapamiętaj efekt z aplikacji…")
         ttk.Checkbutton(self.editor, text="Steruj przez Razer", variable=self.ed_enabled).grid(row=0, column=0, sticky="w")
         ttk.Label(self.editor, text="Źródło koloru:").grid(row=0, column=1, sticky="e", padx=(10, 4))
         ttk.Combobox(self.editor, textvariable=self.ed_source, state="readonly", width=14,
@@ -439,21 +443,30 @@ class App:
         ttk.Separator(btns, orient="vertical").pack(side="left", fill="y", padx=6)
         ttk.Checkbutton(btns, variable=self.ed_use_scene,
                         text="Własna fala w Wave/Spectrum/Koło").pack(side="left")
-        ttk.Button(btns, text="Zapamiętaj efekt z aplikacji…",
+        # (the button says whether an effect is remembered: no extra label to cut off)
+        ttk.Button(btns, textvariable=self.ed_scene_info,
                    command=self.capture_scene).pack(side="left", padx=6)
-        ttk.Label(btns, textvariable=self.ed_scene_info, foreground=theme.MUTED).pack(side="left")
         self.editor.columnconfigure(5, weight=1)
 
     def _build_account_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=16)
+        tab = ttk.Frame(self.notebook, padding=TAB_PADDING)
         self.notebook.add(tab, text="Konto Tuya")
         self.account_var = tk.StringVar()
-        ttk.Label(tab, textvariable=self.account_var, font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        ttk.Label(tab, textvariable=self.account_var, font=self.fonts["strong"]).pack(anchor="w")
+        # Logged in: a short state and the actions; the QR login steps only on request
+        self.account_actions = ttk.Frame(tab)
+        ttk.Button(self.account_actions, text="Odśwież z konta",
+                   command=self.refresh_from_account).pack(side="left")
+        ttk.Button(self.account_actions, text="Zaloguj ponownie…",
+                   command=lambda: self._show_login(True)).pack(side="left", padx=6)
+        ttk.Button(self.account_actions, text="Wyloguj", command=self.logout).pack(side="left")
+        self.login_box = ttk.Frame(tab)
+        tab = self.login_box
         ttk.Label(
             tab, justify="left", wraplength=780,
             text=(
-                "Zaloguj się kontem z aplikacji Smart Life / Tuya Smart, żeby pobrać listę żarówek "
-                "i ich klucze. Konto służy tylko do odczytu kluczy, a żarówki są potem sterowane lokalnie.\n\n"
+                "Zaloguj się kontem z aplikacji Smart Life / Tuya Smart, żeby pobrać listę świateł "
+                "i ich klucze. Konto służy tylko do odczytu kluczy, a światła są potem sterowane lokalnie.\n\n"
                 "1. W aplikacji: Ja → ⚙ Ustawienia → Konto i bezpieczeństwo → Kod użytkownika (User Code).\n"
                 "2. Wpisz kod poniżej i kliknij „Pokaż kod QR”.\n"
                 "3. Zeskanuj kod QR aplikacją (ikona skanera w prawym górnym rogu) i potwierdź logowanie.\n"
@@ -469,18 +482,22 @@ class App:
         self.user_code_var = tk.StringVar(value=self.config.user_code)
         ttk.Entry(row, textvariable=self.user_code_var, width=18).pack(side="left", padx=6)
         ttk.Button(row, text="Pokaż kod QR", command=self.start_login).pack(side="left")
-        ttk.Button(row, text="Wyloguj (usuń zapisane logowanie)", command=self.logout).pack(side="left", padx=12)
         self.login_var = tk.StringVar()
         ttk.Label(tab, textvariable=self.login_var, foreground=theme.MUTED).pack(anchor="w", pady=(10, 6))
         self.qr_label = ttk.Label(tab)
         self.qr_label.pack(anchor="w")
+        self._login_requested = False
+        self._update_account_label()
+
+    def _show_login(self, show: bool) -> None:
+        self._login_requested = show
         self._update_account_label()
 
     def _scrollable(self, parent):
         """A frame that scrolls vertically when its content is taller than the window."""
         canvas = tk.Canvas(parent, highlightthickness=0, borderwidth=0, background=theme.CANVAS)
         bar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-        inner = ttk.Frame(canvas, padding=(16, 12, 16, 12))
+        inner = ttk.Frame(canvas, padding=(2, 8, 12, 8))
         window = canvas.create_window((0, 0), window=inner, anchor="nw")
         canvas.configure(yscrollcommand=bar.set)
         inner.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -504,7 +521,7 @@ class App:
     def _build_settings_tab(self) -> None:
         outer = ttk.Frame(self.notebook)
         self.notebook.add(outer, text="Ustawienia")
-        bottom = ttk.Frame(outer, padding=(16, 6, 16, 8))
+        bottom = ttk.Frame(outer, padding=(2, 6, 2, 4))
         bottom.pack(side="bottom", fill="x")  # always visible, whatever the window height
         ttk.Separator(outer, orient="horizontal").pack(side="bottom", fill="x")
         body = ttk.Frame(outer)
@@ -518,7 +535,7 @@ class App:
         self.set_bulb_rate = tk.DoubleVar(value=s.bulb_effect_rate)
         self.set_effect_sync = tk.StringVar(value=s.effect_sync)
         self.set_layout = tk.StringVar(value=LAYOUT_LABELS[s.keyboard_layout])
-        ttk.Checkbutton(tab, text="Uruchamiaj razem z Windows (przejmuj żarówki po włączeniu komputera)",
+        ttk.Checkbutton(tab, text="Uruchamiaj razem z Windows (przejmuj światła po włączeniu komputera)",
                         variable=self.set_autostart).pack(anchor="w")
         ttk.Checkbutton(tab, text="Startuj zminimalizowany do zasobnika (obok zegara)",
                         variable=self.set_minimized).pack(anchor="w", pady=(4, 0))
@@ -528,22 +545,22 @@ class App:
         self.set_theme = tk.StringVar(value=THEME_LABELS.get(s.theme, THEME_LABELS["auto"]))
         ttk.Combobox(row, textvariable=self.set_theme, state="readonly", width=22,
                      values=list(THEME_LABELS.values())).pack(side="left", padx=6)
-        ttk.Label(row, text="(zmiana po ponownym otwarciu programu)",
+        ttk.Label(row, text="(zmiana po ponownym uruchomieniu: „Zakończ” w menu ikony)",
                   foreground=theme.MUTED).pack(side="left")
         ttk.Label(tab, text="Gdy Razer działa, ale żadna gra nie wysyła efektów Chroma:").pack(anchor="w")
         for mode in IDLE_MODES:
             ttk.Radiobutton(tab, text=IDLE_LABELS[mode], value=mode, variable=self.set_idle).pack(anchor="w", padx=12)
         ttk.Label(tab, foreground=theme.MUTED, wraplength=self.px(780), justify="left",
                   text="Efekt wybierasz w zakładce „Profile efektów”.").pack(anchor="w", padx=12, pady=(2, 0))
-        ttk.Label(tab, text="Synchronizacja kolorów żarówek w efektach:").pack(anchor="w", pady=(12, 0))
+        ttk.Label(tab, text="Synchronizacja kolorów świateł w efektach:").pack(anchor="w", pady=(12, 0))
         ttk.Radiobutton(
             tab, value="precise", variable=self.set_effect_sync,
-            text="Dokładna – kolor liczony w chwili wysłania, tak często, jak pozwala „Szybkość zmian” żarówki",
+            text="Dokładna – kolor liczony w chwili wysłania, tak często, jak pozwala „Szybkość zmian” światła",
         ).pack(anchor="w", padx=12)
         row = ttk.Frame(tab)
         row.pack(anchor="w", padx=12)
         ttk.Radiobutton(row, value="ticks", variable=self.set_effect_sync,
-                        text="Oszczędna – wszystkie żarówki razem, zmian na sekundę:").pack(side="left")
+                        text="Oszczędna – wszystkie światła razem, zmian na sekundę:").pack(side="left")
         ttk.Spinbox(row, from_=0.5, to=5, increment=0.5, textvariable=self.set_bulb_rate, width=5).pack(side="left", padx=6)
         ttk.Label(row, text="(3–5 = płynniej)", foreground=theme.MUTED).pack(side="left")
         row = ttk.Frame(tab)
@@ -559,18 +576,18 @@ class App:
             tab, foreground=theme.MUTED, wraplength=self.px(780), justify="left",
             text=("Kolory z gry zawsze mają pierwszeństwo. Efektów z profilu Synapse nie da się odczytać – "
                   "w trybie pełnej synchronizacji program sam odtwarza wybrany profil na wszystkich "
-                  "urządzeniach Razer Chroma i żarówkach, a po zamknięciu programu urządzenia Razer "
+                  "urządzeniach Razer Chroma i światłach, a po zamknięciu programu urządzenia Razer "
                   "wracają do profilu z Synapse.\n"
                   "Po wyłączeniu komputera, uśpieniu, zamknięciu Synapse lub programu albo wstrzymaniu "
-                  "sterowania żarówki wracają do stanu sprzed przejęcia i dalej działają z Home Assistant."),
+                  "sterowania światła wracają do stanu sprzed przejęcia i dalej działają z Home Assistant."),
         ).pack(anchor="w", pady=(16, 0))
-        lat = ttk.LabelFrame(tab, text="Opóźnienie żarówek w efektach", padding=8)
+        lat = ttk.LabelFrame(tab, text="Opóźnienie świateł w efektach", padding=8)
         lat.pack(anchor="w", fill="x", pady=(12, 0))
         self.set_latency_mode = tk.StringVar(value=s.latency_mode)
         self.set_latency_ms = tk.IntVar(value=s.latency_ms)
         lrow = ttk.Frame(lat)
         lrow.pack(anchor="w")
-        for mode, label in (("auto", "Automatyczna (z pomiaru każdej żarówki)"),
+        for mode, label in (("auto", "Automatyczna (z pomiaru każdego światła)"),
                             ("manual", "Ręczna:"), ("off", "Wyłączona")):
             ttk.Radiobutton(lrow, text=label, value=mode, variable=self.set_latency_mode).pack(side="left", padx=(0, 6))
             if mode == "manual":
@@ -579,9 +596,9 @@ class App:
                 ttk.Label(lrow, text="ms").pack(side="left", padx=(2, 14))
         ttk.Label(
             lat, foreground=theme.MUTED, wraplength=self.px(780), justify="left",
-            text=("Efekty liczy program, więc wysyła żarówkom kolor z wyprzedzeniem równym ich opóźnieniu – "
-                  "wtedy świecą równo z klawiaturą. Zmierzone opóźnienie każdej żarówki widać w kolumnie "
-                  "„Opóźnienie” w zakładce Światła, a korektę dla jednej żarówki ustawisz w jej ustawieniach. "
+            text=("Efekty liczy program, więc wysyła światłom kolor z wyprzedzeniem równym ich opóźnieniu – "
+                  "wtedy świecą równo z klawiaturą. Zmierzone opóźnienie każdego światła widać w kolumnie "
+                  "„Opóźnienie” w zakładce Światła, a korektę dla jednego światła ustawisz w jej ustawieniach. "
                   "Kolorów z gry nie da się wyprzedzić (gra steruje klawiaturą bezpośrednio)."),
         ).pack(anchor="w", pady=(4, 0))
         upd = ttk.LabelFrame(tab, text="Aktualizacje", padding=8)
@@ -598,14 +615,14 @@ class App:
         ttk.Button(bottom, text="Otwórz folder z logami", command=self.open_logs).pack(side="left", padx=8)
 
     def _build_profiles_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
+        tab = ttk.Frame(self.notebook, padding=TAB_PADDING)
         self.notebook.add(tab, text="Profile efektów")
         self._profiles_tab_index = self.notebook.index("end") - 1
         left = ttk.Frame(tab)
         left.pack(side="left", fill="y")
         ttk.Label(left, text="Profile:").pack(anchor="w")
         self.profile_list = tk.Listbox(left, height=14, width=24, exportselection=False)
-        self.profile_list.pack(fill="y", expand=True)
+        self.profile_list.pack(fill="y", expand=True, anchor="w")
         self.profile_list.bind("<<ListboxSelect>>", lambda _e: self._load_profile())
         btns = ttk.Frame(left)
         btns.pack(fill="x", pady=(6, 0))
@@ -651,8 +668,8 @@ class App:
             ttk.Button(colors, text=f"Kolor {i + 1}…", command=lambda i=i: self.pick_profile_color(i)).pack(side="left", padx=(4, 10))
             self.pf_swatches.append(sw)
         ttk.Button(right, text="Zapisz profil", command=self.save_profile).pack(anchor="w", pady=(6, 8))
-        ttk.Label(right, text="Podgląd (klawiatura, mysz, podkładka, słuchawki, keypad, Chroma Link, żarówki):",
-                  foreground=theme.MUTED).pack(anchor="w")
+        ttk.Label(right, text="Podgląd: klawiatura, mysz, podkładka, słuchawki, keypad, Chroma Link i światła",
+                  foreground=theme.MUTED, wraplength=self.px(470), justify="left").pack(anchor="w")
         self.preview = tk.Canvas(right, width=self.px(470), height=self.px(150), background=theme.PREVIEW,
                                  highlightthickness=0)
         self.preview.pack(anchor="w", pady=(4, 0))
@@ -870,7 +887,11 @@ class App:
                 f"{ms:.0f} ms" if ms is not None else "–",
                 status,
             )
-            tags = (_status_tag(status),)
+            tag = _status_tag(status)
+            if tag in ("warn", "err"):
+                status = ("⚠ " if tag == "warn" else "✕ ") + status  # the state says it, not the row
+            values = values[:-1] + (status,)
+            tags = (tag,)
             if dev.id in existing:
                 self.tree.item(dev.id, values=values, tags=tags)
             else:
@@ -947,7 +968,7 @@ class App:
         self.ed_method.set(METHOD_LABELS.get(dev.method, METHOD_LABELS["auto"]))
         self.ed_latency.set(int(dev.latency_adjust_ms))
         self.ed_use_scene.set(dev.use_scene and bool(dev.scene))
-        self.ed_scene_info.set("(zapamiętany)" if dev.scene else "(brak)")
+        self.ed_scene_info.set("Zmień zapamiętany efekt…" if dev.scene else "Zapamiętaj efekt z aplikacji…")
         speed = min(SPEED_LABELS, key=lambda v: abs(v - dev.min_interval))
         self.ed_speed.set(SPEED_LABELS[speed])
 
@@ -1082,7 +1103,7 @@ class App:
         if not self.config.devices:
             messagebox.showinfo("TuyaChroma", "Najpierw zaloguj się w zakładce „Konto Tuya”.")
             return
-        self.set_busy("Szukam żarówek w sieci (10 s)…")
+        self.set_busy("Szukam świateł w sieci (10 s)…")
         self.run_bg(lambda: self._scan_and_probe(), self._scan_done,
                     lambda err: self.set_busy(f"Błąd wyszukiwania: {err}"))
 
@@ -1106,7 +1127,7 @@ class App:
     def test_bulb(self) -> None:
         dev = self._selected_device()
         if dev is None or not dev.ip:
-            messagebox.showinfo("TuyaChroma", "Wybierz żarówkę z adresem IP.")
+            messagebox.showinfo("TuyaChroma", "Wybierz światło z adresem IP.")
             return
         self.set_busy(f"Testuję {dev.name}…")
         self.run_bg(lambda: self._test(dev), lambda msg: self.set_busy(msg),
@@ -1125,7 +1146,7 @@ class App:
             bulb = tinytuya.BulbDevice(dev.id, dev.ip, dev.local_key, version=float(version))
             bulb.status()
             if not bulb.dpset.get("colour"):
-                return f"{dev.name}: ta żarówka nie obsługuje kolorów RGB"
+                return f"{dev.name}: to światło nie obsługuje kolorów RGB"
             original = bulb.state()
             try:
                 for rgb in ((255, 0, 0), (0, 255, 0), (0, 0, 255)):
@@ -1148,7 +1169,7 @@ class App:
     # -------------------------------------------------------- razer devices
 
     def _build_razer_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
+        tab = ttk.Frame(self.notebook, padding=TAB_PADDING)
         self.notebook.add(tab, text="Urządzenia Razer")
         bar = ttk.Frame(tab)
         bar.pack(fill="x", pady=(0, 6))
@@ -1167,6 +1188,11 @@ class App:
             self.razer_tree.heading(col, text=title)
             self.razer_tree.column(col, width=self.px(width), anchor="w")
         self.razer_tree.pack(fill="both", expand=True)
+        # Nothing detected: say what to check, in the list itself
+        self.razer_empty = ttk.Label(
+            self.razer_tree, background=theme.SURFACE, foreground=theme.MUTED, justify="center",
+            text=("Nie wykryto urządzeń Razer.\nSprawdź, czy Razer Synapse działa, a urządzenie jest "
+                  "podłączone,\ni kliknij „Odśwież listę”."))
         ttk.Label(
             tab, foreground=theme.MUTED, wraplength=self.px(820), justify="left",
             text=("Lista odświeża się sama po podłączeniu lub odłączeniu urządzenia. Efekty trafiają do "
@@ -1207,6 +1233,10 @@ class App:
                                 f"{layout} (odświeżono {stamp}).")
         else:
             self.razer_info.set(f"Nie wykryto urządzeń Razer (odświeżono {stamp}).")
+        if devices:
+            self.razer_empty.place_forget()
+        else:
+            self.razer_empty.place(relx=0.5, rely=0.5, anchor="center")
 
     # -------------------------------------------- bulbs that changed their IP
 
@@ -1314,22 +1344,40 @@ class App:
         self._last_rescan = now
         _LOGGER.info("Unreachable bulb(s) %s: searching the network for new IPs", long_failing)
 
-        def done(found: dict) -> None:
-            self._rescanning = False
-            changed = []
+        def search() -> tuple[dict, dict]:
+            # Anyone on the LAN can announce any light (the broadcast key is public):
+            # only a light that is failing moves, and only to an address that
+            # answers with its own key (which also tells the real protocol version).
+            found = scan(10)
+            moves = {}
             for dev in self.config.devices:
                 info = found.get(dev.id)
-                if info and info.get("ip") and info["ip"] != dev.ip:
-                    changed.append(f"{dev.name}: {dev.ip or '?'} → {info['ip']}")
-                    dev.ip = info["ip"]
-                    if info.get("version"):
-                        dev.version = info["version"]
+                if (dev.id not in long_failing or not info or not info.get("ip")
+                        or info["ip"] == dev.ip):
+                    continue
+                version = probe_version(dev.id, info["ip"], dev.local_key,
+                                        dev.version or info.get("version", ""))
+                if version:
+                    moves[dev.id] = {"ip": info["ip"], "version": version}
+                else:
+                    _LOGGER.warning("%s: announced at %s, but nothing there answers with its key - "
+                                    "ignored", dev.name, info["ip"])
+            return found, moves
+
+        def done(result: tuple[dict, dict]) -> None:
+            self._rescanning = False
+            found, moves = result
+            changed = []
+            for dev in self.config.devices:
+                if (move := moves.get(dev.id)) is not None:
+                    changed.append(f"{dev.name}: {dev.ip or '?'} → {move['ip']}")
+                    dev.ip, dev.version = move["ip"], move["version"]
             if not any(i in found for i in long_failing):
                 # They don't announce themselves: switched off, not a new IP.
                 self._rescan_every = self.RESCAN_IDLE
             if changed:
                 _LOGGER.info("New bulb IPs: %s", "; ".join(changed))
-                self.set_busy("Znaleziono żarówki pod nowym adresem IP: " + "; ".join(changed))
+                self.set_busy("Znaleziono światła pod nowym adresem IP: " + "; ".join(changed))
                 self.refresh_devices()
                 self._reload_editor_if_idle()
                 self.save_and_apply(bulbs_only=True)
@@ -1337,7 +1385,7 @@ class App:
         def failed(_err: Exception) -> None:
             self._rescanning = False
 
-        self.run_bg(lambda: scan(10), done, failed)
+        self.run_bg(search, done, failed)
 
     # -------------------------------------------------------------- updates
 
@@ -1498,7 +1546,7 @@ class App:
             lines.append("Warto wiedzieć:")
             lines += [f"• {n}" for n in advice.notes]
         if not lines:
-            lines = ["Wszystkie żarówki mają już najlepsze ustawienia."]
+            lines = ["Wszystkie światła mają już najlepsze ustawienia."]
         text = "\n".join(lines)
         self.set_busy("Sprawdzono urządzenia (szczegóły w logu: „Device report”).")
         if advice.changes:
@@ -1591,11 +1639,20 @@ class App:
 
 
     def _update_account_label(self) -> None:
-        if self.config.username or self.config.devices:
+        logged_in = bool(self.config.username or self.config.devices)
+        if logged_in:
             who = self.config.username or "konto Tuya"
             self.account_var.set(f"Zalogowano: {who} – {len(self.config.devices)} świateł RGB")
         else:
             self.account_var.set("Nie zalogowano")
+        if not hasattr(self, "login_box"):
+            return
+        self.account_actions.pack_forget()
+        self.login_box.pack_forget()
+        if logged_in:
+            self.account_actions.pack(anchor="w", pady=(10, 0))
+        if not logged_in or self._login_requested:
+            self.login_box.pack(anchor="w", fill="x", pady=(8, 0))
 
     def start_login(self) -> None:
         code = self.user_code_var.get().strip()
@@ -1724,7 +1781,7 @@ class App:
         if s.sync_enabled:
             self.run_bg(lambda: self.service.start(self.config))
         else:
-            self.set_busy("Oddaję żarówki do HA…")
+            self.set_busy("Oddaję światła do HA…")
             self.run_bg(self.service.stop, lambda _r: self.set_busy("Sterowanie wstrzymane."))
         self._update_tray_menu()
 
@@ -1733,7 +1790,11 @@ class App:
         if not s.sync_enabled:
             text, color = "Sterowanie wstrzymane – światła działają z HA", theme.IDLE
         elif not self.config.enabled_devices:
-            text, color = "Wybierz światła w zakładce „Światła”", theme.WARN
+            if any(d.enabled for d in self.config.devices):  # ticked, but no address yet
+                text = "Zaznaczone światła nie mają adresu IP – kliknij „Szukaj w sieci”"
+            else:
+                text = "Zaznacz światła (✓) w zakładce „Światła”"
+            color = theme.WARN
         else:
             text = f"Razer: {self.service.razer_status}"
             color = {"ok": theme.OK, "error": theme.ERROR}.get(self.service.status_level(), theme.WARN)
@@ -1839,7 +1900,7 @@ class App:
             try:
                 self._tray.notify(
                     "TuyaChroma działa dalej w zasobniku obok zegara. "
-                    "Kliknij ikonę, żeby otworzyć; „Zakończ” oddaje żarówki do HA.",
+                    "Kliknij ikonę, żeby otworzyć; „Zakończ” oddaje światła do HA.",
                     "TuyaChroma",
                 )
             except Exception:  # noqa: BLE001 - notifications are optional
@@ -1875,7 +1936,7 @@ class App:
         if self._quitting:
             return
         self._quitting = True
-        self.set_busy("Oddaję żarówki do HA…")
+        self.set_busy("Oddaję światła do HA…")
         self.root.update_idletasks()
         self.service.stop()
         if self._tray is not None:

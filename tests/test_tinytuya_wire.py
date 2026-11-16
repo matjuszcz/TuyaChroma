@@ -88,3 +88,26 @@ def test_restore_after_a_lost_command_is_one_command() -> None:
     assert time.monotonic() - started < 2.0
     restores = [d for _t, c, d in fake.log if c == 7 and d and d.get("21") == "white"]
     assert restores and len(restores[-1]) >= 4  # all values in one command
+
+
+def test_lost_takeover_answer_still_gives_the_light_back() -> None:
+    """The light switched to our color but its answer was lost: it must be given back."""
+    lost = {"n": 0}
+
+    def skip(cmd, n, obj):
+        if cmd == 7 and (obj.get("dps") or {}).get("21") == "colour" and lost["n"] < 1:
+            lost["n"] += 1
+            return "apply"  # applied, but no answer
+        return False
+
+    fake = FakeBulb(delay=0.05, skip=skip)
+    w = _worker(fake)
+    w.start()
+    try:
+        w.set_color((200, 10, 10))
+        assert _wait(lambda: fake.dps["21"] == "colour" and lost["n"] == 1, 8)
+        assert _wait(lambda: w._in_sync_mode, 8)
+        w.release()
+        assert _wait(lambda: fake.dps["21"] == "white" and w.status == bulbs.STATUS_READY, 20)
+    finally:
+        w.stop(5)

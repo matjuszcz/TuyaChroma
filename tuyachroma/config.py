@@ -47,7 +47,7 @@ class Device:
     mode: str = "vivid"
     brightness: float = 1.0
     min_brightness: float = 0.05
-    method: str = "auto"  # auto: instant color changes where the light supports them
+    method: str = "auto"  # auto: colour mode with smooth fades (music/jump only when chosen)
     min_interval: float = 0.15
     latency_adjust_ms: int = 0  # per-bulb correction for effect timing (ms)
     # The light's own effect captured from the Tuya app (e.g. a wave along a
@@ -241,8 +241,8 @@ def load(path: Path | None = None) -> AppConfig:
     settings.latency_ms = max(0, min(3000, int(settings.latency_ms)))
     settings.fps = max(1.0, min(60.0, float(settings.fps)))
     if settings.config_rev < 2 or "config_rev" not in s:
-        # 1.9.12: "Kolor" was only the default; lights that can change colors
-        # instantly (music/control data) now do so - they no longer fade behind.
+        # 1.9.12: "Kolor" was only the default, so it became "auto". (auto is
+        # colour mode with smooth fades again; music/jump only when chosen.)
         for dev in devices:
             if dev.method == "colour":
                 dev.method = "auto"

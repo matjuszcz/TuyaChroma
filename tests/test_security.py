@@ -142,6 +142,18 @@ def test_device_database_rejects_entries_that_break_detection() -> None:
     good = {"version": 3, "rules": [{"category": "keyboard", "keywords": ["huntsman"]}]}
     devices_db.validate(dict(good))
     for bad in ({"keyboard_layouts": {"mini": [1]}}, {"notes": [{"match": "", "note": "x"}]},
-                {"version": 10**9}):
+                {"version": 10**9}, {"version": True}, {"version": 0},
+                {"keyboard_layouts": {"huge": ["x"]}},
+                {"rules": [{"category": "keyboard", "keywords": [""]}]},
+                {"pids": {"0257": {"category": "toaster"}}}):
         with pytest.raises(devices_db.DatabaseError):
             devices_db.validate({**good, **bad})
+
+
+def test_malformed_broadcast_is_ignored(monkeypatch) -> None:
+    import json
+
+    monkeypatch.setattr(scan.tinytuya, "decrypt_udp", lambda d: d.decode())
+    for payload in ({"gwId": ["x"], "ip": "10.0.0.2"}, {"gwId": "b", "ip": "not an ip"},
+                    {"gwId": "b", "ip": 5}):
+        assert scan.parse_broadcast(json.dumps(payload).encode()) is None

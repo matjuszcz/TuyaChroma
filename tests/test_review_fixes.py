@@ -195,6 +195,13 @@ def test_slow_loading_game_gets_the_devices_after_probation(monkeypatch) -> None
         service.stop()
 
 
+def test_starlight_drops_stars_past_a_shorter_strip() -> None:
+    rend = Renderer(Profile(effect="starlight"))
+    rend.strip(5, 1.0)
+    rend._state["bulbs"] = {4: (1.0, (255, 255, 255))}  # a star on the 5th light
+    assert len(rend.strip(2, 1.05)) == 2
+
+
 def test_fire_and_starlight_survive_a_changing_number_of_lights() -> None:
     for effect in ("fire", "starlight"):
         rend = Renderer(Profile(effect=effect, speed=10, density=10))

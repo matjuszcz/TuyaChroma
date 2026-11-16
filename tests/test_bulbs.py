@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from tuyachroma.bulbs import STATUS_READY, STATUS_SYNC, STATUS_UNSUPPORTED, BulbConfig, BulbWorker
 from tuyachroma.engine import bulb_color
 from tuyachroma.razer import Frame
@@ -374,3 +376,61 @@ def test_takeover_uses_the_connection_state_if_the_read_is_skipped() -> None:
     bulb.status = lambda: {"Error": "Timeout", "Err": "902", "Payload": None}
     worker._send((255, 0, 0))
     assert worker._original.get("mode") == "white" and worker._original.get("switch") is True
+
+
+def test_full_send_repeated_until_confirmed() -> None:
+    """A lost switch+mode send must not be followed by colour-only sends."""
+    bulb = FakeBulb(music=False)
+    cfg = BulbConfig(name="lamp", id="x", ip="1.2.3.4", local_key="k", min_interval=0.05)
+    worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
+    worker._connect()
+    real = bulb.set_multiple_values
+    bulb.set_multiple_values = lambda values, nowait=False: (real(values, nowait),
+                                                             {"Err": "902", "Error": "Timeout"})[1]
+    with pytest.raises(ConnectionError):
+        worker._send((255, 0, 0))
+    bulb.set_multiple_values = real
+    worker._send((0, 255, 0))
+    assert bulb.sent[-1][1].get("20") is True and bulb.sent[-1][1].get("21") == "colour"
+
+
+def test_heartbeat_waits_only_in_music_mode(monkeypatch) -> None:
+    from tuyachroma import bulbs as _b
+
+    monkeypatch.setattr(_b, "HEARTBEAT_EVERY", 0.1)
+    for music, expected in ((False, True), (True, False)):
+        seen = []
+
+        class Beat(FakeBulb):
+            def heartbeat(self, nowait=False):
+                seen.append(nowait)
+
+        bulb = Beat(music=music)
+        cfg = BulbConfig(name="l", id="hb", ip="1", local_key="k", min_interval=0.05,
+                         method="music" if music else "colour")
+        worker = BulbWorker(cfg, device_factory=lambda _c: bulb)
+        worker.start()
+        try:
+            assert wait_for(lambda: len(seen) >= 2, 3)
+        finally:
+            worker.stop(2)
+        assert set(seen) == {expected}, (music, seen)
+
+
+def test_scene_mode_after_reconnect_is_switched_back_to_colors() -> None:
+    class InScene(FakeBulb):
+        def status(self):
+            return {"dps": {"20": True, "21": "scene", "22": 500, "23": 0, "24": "000003e803e8"}}
+
+    bulb = InScene(music=False)
+    cfg = BulbConfig(name="lamp", id="x", ip="1.2.3.4", local_key="k", min_interval=0.05)
+    worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
+    worker._in_sync_mode, worker._target = True, (1, 2, 3)
+    worker._connect()
+    assert worker._resend_full
+    from tuyachroma.bulbs import NativeScene
+
+    worker2 = BulbWorker(cfg, device_factory=lambda _cfg: InScene(music=False))
+    worker2._in_sync_mode, worker2._target = True, NativeScene.from_state({"21": "scene"})
+    worker2._connect()
+    assert not worker2._resend_full  # it plays its own effect: leave it

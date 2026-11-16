@@ -815,13 +815,15 @@ def test_unreachable_bulbs_found_under_new_ip(tmp_path, monkeypatch) -> None:
     scans = []
 
     on_network = {"a": {"id": "a", "ip": "10.0.0.50", "version": "3.5"},
-                  "b": {"id": "b", "ip": "10.0.0.6", "version": "3.3"}}
+                  "b": {"id": "b", "ip": "10.0.0.66", "version": "3.1"}}  # spoofed: b works
 
     def fake_scan(seconds):
         scans.append(seconds)
         return dict(on_network)
 
     monkeypatch.setattr(gui, "scan", fake_scan)
+    answers = {"10.0.0.50": "3.5"}  # where the light really is (it answers with its key)
+    monkeypatch.setattr(gui, "probe_version", lambda i, ip, k, preferred="": answers.get(ip))
     monkeypatch.setattr(app, "run_bg", lambda func, done=None, error=None: done(func()))
     applied = []
     monkeypatch.setattr(app, "save_and_apply", lambda bulbs_only=False: applied.append(bulbs_only))
@@ -832,7 +834,7 @@ def test_unreachable_bulbs_found_under_new_ip(tmp_path, monkeypatch) -> None:
         app._check_unreachable(1061.0)        # failing for a minute: search
         assert scans == [10]
         assert config.device("a").ip == "10.0.0.50" and config.device("a").version == "3.5"
-        assert config.device("b").ip == "10.0.0.6"
+        assert config.device("b").ip == "10.0.0.6"  # a working light is never moved
         assert applied == [True]
         app._check_unreachable(1100.0)        # still failing, but not more than every 5 min
         assert scans == [10]
