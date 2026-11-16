@@ -210,11 +210,14 @@ def apply_update(release: Release, get=_get) -> None:
             f"brak uprawnień do zapisu w folderze {current.parent} – przenieś program do folderu "
             "użytkownika (np. %LOCALAPPDATA%\\TuyaChroma) albo pobierz nową wersję ręcznie")
     work = Path(tempfile.mkdtemp(prefix="TuyaChroma-update-"))
-    new_exe = download(release, work, get)
     try:
-        install(new_exe, current)
-    except PermissionError as err:
-        raise UpdateError(f"nie można podmienić pliku programu ({err}) – pobierz nową wersję ręcznie") from err
-    shutil.rmtree(work, ignore_errors=True)
+        new_exe = download(release, work, get)
+        try:
+            install(new_exe, current)
+        except PermissionError as err:
+            raise UpdateError(f"nie można podmienić pliku programu ({err}) – pobierz nową wersję "
+                              "ręcznie") from err
+    finally:
+        shutil.rmtree(work, ignore_errors=True)  # also after a failed download or install
     _LOGGER.info("Updated to %s, restarting", release.version)
     start_detached(current, "--updated", "--relaunched")

@@ -67,3 +67,55 @@ def test_broadcast_must_come_from_the_announced_private_ip() -> None:
     assert not scan.trusted(info, "192.168.1.66")              # someone else speaking for it
     assert not scan.trusted(dict(info, ip="8.8.8.8"), "8.8.8.8")  # not on the LAN
     assert not scan.trusted(dict(info, ip="nonsense"), "nonsense")
+
+
+def test_known_keys_are_masked_in_any_form() -> None:
+    from tuyachroma import redact
+
+    redact.remember("ab,cd\"ef gh)1234", "0123456789abcdef")
+    for line in ("Status request returned an error, is version 3.3 and local key "
+                 "b'0123456789abcdef' correct?",
+                 "{'local_key': 'ab,cd\"ef gh)1234'}",
+                 "session key: b'\\xbc&O?\\x01'"):
+        out = redact.redact(line)
+        assert "0123456789abcdef" not in out and "ab,cd" not in out and "\\xbc" not in out, out
+    for normal in ("Session key negotiation step 2", "Local key for Lampka biurko is missing",
+                   "access_token expired, renewing"):
+        assert redact.redact(normal) == normal
+    assert redact.redact("localKey='zz,yy'") == "localKey=***"
+
+
+def test_tuya_sharing_console_handler_is_filtered(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    root = logging.getLogger()
+    saved = root.handlers[:]
+    try:
+        root.handlers = []
+        main.setup_logging(False)
+        logging.getLogger("tuya_sharing").error("net work error = url: /v1.0/m/token/RTSECRET99 x")
+        for h in root.handlers:
+            h.flush()
+    finally:
+        for h in root.handlers:
+            h.close()
+        root.handlers = saved
+    assert "RTSECRET99" not in capsys.readouterr().err
+    assert "RTSECRET99" not in (tmp_path / "TuyaChroma" / "log.txt").read_text(encoding="utf-8")
+
+
+def test_undecryptable_settings_are_kept_before_saving(tmp_path, monkeypatch) -> None:
+    from tuyachroma import config as config_mod
+    from tuyachroma import dpapi
+
+    path = tmp_path / "config.json"
+    path.write_text('{"devices": [{"id": "a", "name": "A", "local_key": "dpapi:xx"}]}',
+                    encoding="utf-8")
+
+    def broken(value):
+        raise OSError("DPAPI not ready")
+
+    monkeypatch.setattr(dpapi, "unprotect", broken)
+    cfg = config_mod.load(path)
+    assert cfg.devices == [] and cfg.read_errors
+    config_mod.save(cfg, path)
+    assert "dpapi:xx" in (tmp_path / "config.json.bad").read_text(encoding="utf-8")

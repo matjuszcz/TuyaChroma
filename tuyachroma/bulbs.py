@@ -422,15 +422,17 @@ class BulbWorker(threading.Thread):
         self._last_value = None  # unknown after (re)connecting: send in full
         self._scene_sent = None  # a light that rebooted lost its effect: send it again
         # _in_sync_mode survives reconnects: the bulb may still show our color -
-        # unless it came back switched off or in white mode (powered off and on
-        # at the wall, or it rebooted): then switch and mode are sent again.
-        if self._in_sync_mode:
-            values = status["dps"]
-            switch, mode = values.get(str(dev.dpset.get("switch"))), values.get(str(dev.dpset.get("mode")))
-            if switch is False or (mode is not None and mode not in ("colour", "music")):
-                self._resend_full = True
-                _LOGGER.info("%s: came back %s - switching it to colors again", self.cfg.name,
-                             "switched off" if switch is False else f"in {mode} mode")
+        # unless it came back in another mode (powered off and on at the wall:
+        # white; or music mode after leaving it): then the mode is sent again.
+        # (Switched off is left alone: that's someone turning it off on purpose.)
+        mode = status["dps"].get(str(dev.dpset.get("mode")))
+        expected = "music" if self.use_music else "colour"
+        if (self._in_sync_mode and mode is not None and mode != expected and mode != "scene"
+                and self._target is not None and not isinstance(self._target, NativeScene)):
+            self._resend_full = True
+            _LOGGER.log(logging.DEBUG if quiet else logging.INFO,
+                        "%s: came back in %s mode - switching it to %s again", self.cfg.name, mode,
+                        expected)
         self.connected = True
         self.status = STATUS_SYNC if self._in_sync_mode else STATUS_READY
         _LOGGER.log(

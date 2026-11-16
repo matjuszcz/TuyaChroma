@@ -15,6 +15,8 @@ import logging
 import time
 from typing import Any
 
+from . import redact
+
 _LOGGER = logging.getLogger(__name__)
 
 # Client registered by Home Assistant for the Smart Life QR authorization.
@@ -135,6 +137,7 @@ def _token_listener(updated: dict[str, Any], on_token: Callable[[dict[str, Any]]
             # stops working: save it at once, even if what follows fails (losing it
             # was the "sign invalid" / expired login of the 1.9.19 log).
             updated["token_info"] = dict(token_info)
+            redact.remember_session(updated)
             if on_token is not None:
                 on_token(dict(updated))
 

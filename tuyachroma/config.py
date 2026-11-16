@@ -11,7 +11,7 @@ import threading
 import time
 from typing import Any
 
-from . import dpapi
+from . import dpapi, redact
 from .bulbs import BulbConfig
 from .profiles import Profile, default_profiles, typed_fields
 from .razer import DEVICES
@@ -116,6 +116,8 @@ class AppConfig:
     # Saved Tuya login (tokens) to refresh the device list without a new QR code.
     # Stored encrypted with Windows DPAPI.
     tuya_session: dict[str, Any] = field(default_factory=dict)
+    # not saved: loading couldn't decrypt something (the file is kept on the next save)
+    read_errors: bool = field(default=False, repr=False, compare=False)
 
     @property
     def enabled_devices(self) -> list[Device]:
@@ -185,6 +187,7 @@ def load(path: Path | None = None) -> AppConfig:
         _keep_aside(path)
         return AppConfig()
     devices = []
+    read_errors = False  # something saved couldn't be decrypted (DPAPI): keep the file
     raw_devices = data.get("devices")
     for raw in raw_devices if isinstance(raw_devices, list) else []:
         if not isinstance(raw, dict):
@@ -193,8 +196,10 @@ def load(path: Path | None = None) -> AppConfig:
             raw = dict(raw)
             raw["local_key"] = dpapi.unprotect(raw.get("local_key", ""))
             devices.append(Device.from_dict(raw))
+            redact.remember(raw["local_key"])
         except (OSError, TypeError, ValueError) as err:
             _LOGGER.warning("Skipping device %s: %s", raw.get("id"), err)
+            read_errors = True
     s = dict(data["settings"]) if isinstance(data.get("settings"), dict) else {}
     legacy_fx = s.pop("effect", None)  # 1.1: a single effect
     raw_profiles = s.pop("profiles", None)
@@ -243,12 +248,14 @@ def load(path: Path | None = None) -> AppConfig:
     if isinstance(data.get("tuya_session"), str) and data["tuya_session"]:
         try:
             session = json.loads(dpapi.unprotect(data["tuya_session"]))
+            redact.remember_session(session)
         except (OSError, ValueError, TypeError) as err:
             _LOGGER.warning("Saved Tuya login unreadable: %s", err)
+            read_errors = True
     return AppConfig(
         devices=devices, settings=settings,
         username=str(data.get("username") or ""), user_code=str(data.get("user_code") or ""),
-        tuya_session=session,
+        tuya_session=session, read_errors=read_errors,
     )
 
 
@@ -266,6 +273,13 @@ def _keep_aside(path: Path) -> None:
 def save(config: AppConfig, path: Path | None = None) -> None:
     path = path or default_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    if config.read_errors and path.exists():
+        # Lights or the login couldn't be decrypted when loading (e.g. Windows
+        # not ready at autostart): keep that file before it's replaced.
+        _keep_aside(path)
+        config.read_errors = False
+    redact.remember(*(dev.local_key for dev in config.devices))
+    redact.remember_session(config.tuya_session)
     devices = []
     for dev in config.devices:
         raw = asdict(dev)

@@ -308,7 +308,7 @@ def test_light_that_came_back_in_white_mode_gets_colors_again() -> None:
     bulb = FakeBulb(music=False)
     cfg = BulbConfig(name="lamp", id="x", ip="1.2.3.4", local_key="k", min_interval=0.05)
     worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
-    worker._in_sync_mode = True  # it was showing our colors before the reconnect
+    worker._in_sync_mode, worker._target = True, (1, 2, 3)  # showing our colors before
     worker._connect()            # FakeBulb reports mode "white"
     worker._send((255, 0, 0))
     assert bulb.sent[-1][1].get("20") is True and bulb.sent[-1][1].get("21") == "colour"
@@ -321,7 +321,21 @@ def test_light_that_came_back_in_white_mode_gets_colors_again() -> None:
 
     bulb2 = InColour(music=False)
     worker2 = BulbWorker(cfg, device_factory=lambda _cfg: bulb2)
-    worker2._in_sync_mode = True
+    worker2._in_sync_mode, worker2._target = True, (1, 2, 3)
     worker2._connect()
     worker2._send((255, 0, 0))
     assert "20" not in bulb2.sent[-1][1]  # still in our mode: just the color
+
+
+def test_light_switched_off_on_purpose_stays_off_after_reconnect() -> None:
+    class Off(FakeBulb):
+        def status(self):
+            return {"dps": {"20": False, "21": "colour", "22": 500, "23": 0, "24": "000003e803e8"}}
+
+    bulb = Off(music=False)
+    cfg = BulbConfig(name="lamp", id="x", ip="1.2.3.4", local_key="k", min_interval=0.05)
+    worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
+    worker._in_sync_mode, worker._target = True, (1, 2, 3)
+    worker._connect()
+    worker._send((255, 0, 0))
+    assert "20" not in bulb.sent[-1][1]

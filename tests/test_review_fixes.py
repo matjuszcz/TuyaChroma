@@ -86,6 +86,16 @@ def test_damaged_settings_values_fall_back_to_defaults(tmp_path) -> None:
     assert dev.min_interval == 0.15 and dev.enabled is False and dev.zone == ["custom"]
 
 
+def test_non_finite_numbers_keep_defaults(tmp_path) -> None:
+    path = _write(tmp_path, '{"settings": {"latency_ms": 1e400, "fps": NaN, "profiles": '
+                            '[{"name": "P", "speed": Infinity}]}, "devices": [{"id": "a", '
+                            '"name": "A", "local_key": "", "latency_adjust_ms": NaN}]}')
+    cfg = config_mod.load(path)
+    assert cfg.settings.latency_ms == 300 and cfg.settings.fps == 20
+    assert 1 <= cfg.settings.profiles[0].speed <= 10
+    assert [d.id for d in cfg.devices] == ["a"] and cfg.devices[0].latency_adjust_ms == 0
+
+
 def test_settings_that_are_not_a_dict_are_ignored(tmp_path) -> None:
     for data in ([1, 2], {"settings": None, "devices": None, "tuya_session": 5}):
         cfg = config_mod.load(_write(tmp_path, data))

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 import logging
+import math
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,7 +63,8 @@ def typed_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
         if kind == "bool":
             ok = isinstance(value, bool)
         elif kind in ("int", "float"):
-            ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+            ok = (isinstance(value, (int, float)) and not isinstance(value, bool)
+                  and math.isfinite(value))
             if ok and kind == "int":
                 value = int(round(value))
         elif kind in _KINDS:
