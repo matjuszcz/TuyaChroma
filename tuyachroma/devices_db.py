@@ -43,7 +43,8 @@ def cache_path() -> Path:
 
 def validate(db: Any) -> dict[str, Any]:
     """Check the structure; raises DatabaseError if something is wrong."""
-    if not isinstance(db, dict) or not isinstance(db.get("version"), int):
+    if (not isinstance(db, dict) or not isinstance(db.get("version"), int)
+            or isinstance(db["version"], bool) or not 0 < db["version"] < 10**6):
         raise DatabaseError("brak numeru wersji bazy")
     rules = db.get("rules")
     if not isinstance(rules, list) or not rules:
@@ -55,11 +56,12 @@ def validate(db: Any) -> dict[str, Any]:
             raise DatabaseError(f"błędna reguła: {rule!r}")
     layouts = db.get("keyboard_layouts", {})
     if not isinstance(layouts, dict) or not all(
-            k in ("mini", "tkl") and isinstance(v, list) for k, v in layouts.items()):
+            k in ("mini", "tkl") and isinstance(v, list)
+            and all(isinstance(w, str) and w for w in v) for k, v in layouts.items()):
         raise DatabaseError("błędne układy klawiatur")
     for note in db.get("notes", []):
         if not isinstance(note, dict) or not isinstance(note.get("match"), str) \
-                or not isinstance(note.get("note"), str):
+                or not note["match"] or not isinstance(note.get("note"), str):
             raise DatabaseError(f"błędna uwaga: {note!r}")
     pids = db.get("pids", {})
     if not isinstance(pids, dict) or not all(

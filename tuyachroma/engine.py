@@ -104,7 +104,11 @@ def _alive(worker) -> bool:
 
 
 def detect_keyboard_layout() -> str:
-    return razer_devices.keyboard_layout(razer_devices.detect())
+    try:
+        return razer_devices.keyboard_layout(razer_devices.detect())
+    except Exception:  # noqa: BLE001 - e.g. a damaged device database: the common layout
+        _LOGGER.exception("Keyboard layout detection failed - using the full layout")
+        return "full"
 
 
 # Chroma apps that are not games (Synapse itself, this program)

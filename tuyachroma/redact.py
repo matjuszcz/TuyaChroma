@@ -15,7 +15,7 @@ import threading
 _known: set[str] = set()
 _lock = threading.Lock()
 
-_QUOTED = r"(?:b?'[^']*'|b?\"[^\"]*\")"   # a repr: 'x' or b'x' (tinytuya logs %r)
+_QUOTED = r"(?:b?'(?:[^'\\]|\\.)*'|b?\"(?:[^\"\\]|\\.)*\")"   # a repr: 'x' or b'x' (tinytuya logs %r)
 _BARE = r"[^'\",\s})]+"
 _NAME = r"(?:local[_ ]?key|localKey|session key|access_?token|accessToken|refresh_?token|refreshToken)"
 _SECRET = re.compile(

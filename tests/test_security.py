@@ -119,3 +119,23 @@ def test_undecryptable_settings_are_kept_before_saving(tmp_path, monkeypatch) ->
     assert cfg.devices == [] and cfg.read_errors
     config_mod.save(cfg, path)
     assert "dpapi:xx" in (tmp_path / "config.json.bad").read_text(encoding="utf-8")
+
+
+def test_escaped_quote_in_unknown_key_is_masked_whole() -> None:
+    from tuyachroma import redact
+
+    out = redact.redact('{"localKey": "a\\"bcdefghijklmno"}')
+    assert "bcdefghijklmno" not in out, out
+
+
+def test_device_database_rejects_entries_that_break_detection() -> None:
+    import pytest
+
+    from tuyachroma import devices_db
+
+    good = {"version": 3, "rules": [{"category": "keyboard", "keywords": ["huntsman"]}]}
+    devices_db.validate(dict(good))
+    for bad in ({"keyboard_layouts": {"mini": [1]}}, {"notes": [{"match": "", "note": "x"}]},
+                {"version": 10**9}):
+        with pytest.raises(devices_db.DatabaseError):
+            devices_db.validate({**good, **bad})
