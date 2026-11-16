@@ -195,10 +195,11 @@ def process_alive(pid: int) -> bool:
         except PermissionError:
             return True
         return True
-    k32 = ctypes.windll.kernel32
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
     if not handle:
-        return False
+        # Access denied: it exists (e.g. a game protected by its anti-cheat)
+        return ctypes.get_last_error() == 5
     try:
         code = ctypes.c_ulong()
         if not k32.GetExitCodeProcess(handle, ctypes.byref(code)):

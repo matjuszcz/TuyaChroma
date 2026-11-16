@@ -139,10 +139,10 @@ def test_full_sync_service(monkeypatch) -> None:
     from tuyachroma import winsys
 
     monkeypatch.setattr(engine, "SERVICE_CHECK_INTERVAL", 0.05)
-    # game.exe is listed, but not as a running process (this test is about Synapse's
-    # current app; whether some real process 77 exists on the test machine must not matter)
-    monkeypatch.setattr(winsys, "process_alive", lambda pid: False)
+    # game.exe runs only while it is Synapse's current app (whether some real
+    # process 77 exists on the test machine must not matter)
     state = {"current": OWN, "alive": True}
+    monkeypatch.setattr(winsys, "process_alive", lambda pid: pid == 77 and state["current"] == 77)
 
     class Reader:
         def __init__(self, sources):

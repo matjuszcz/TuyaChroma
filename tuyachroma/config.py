@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, field
 import json
 import logging
 import os
 from pathlib import Path
 import threading
+import time
 from typing import Any
 
 from . import dpapi
 from .bulbs import BulbConfig
-from .profiles import Profile, default_profiles
+from .profiles import Profile, default_profiles, typed_fields
 from .razer import DEVICES
 
 _LOGGER = logging.getLogger(__name__)
@@ -56,8 +57,7 @@ class Device:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Device:
-        names = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in names})
+        return cls(**typed_fields(cls, data))
 
     def bulb_config(self) -> BulbConfig:
         from .advisor import product_hint  # noqa: PLC0415
@@ -178,20 +178,27 @@ def load(path: Path | None = None) -> AppConfig:
         return AppConfig()
     except (OSError, ValueError) as err:
         _LOGGER.error("Cannot read %s: %s", path, err)
+        _keep_aside(path)
+        return AppConfig()
+    if not isinstance(data, dict):
+        _LOGGER.error("Cannot read %s: not a settings file", path)
+        _keep_aside(path)
         return AppConfig()
     devices = []
-    for raw in data.get("devices", []):
+    raw_devices = data.get("devices")
+    for raw in raw_devices if isinstance(raw_devices, list) else []:
+        if not isinstance(raw, dict):
+            continue
         try:
             raw = dict(raw)
             raw["local_key"] = dpapi.unprotect(raw.get("local_key", ""))
             devices.append(Device.from_dict(raw))
         except (OSError, TypeError, ValueError) as err:
             _LOGGER.warning("Skipping device %s: %s", raw.get("id"), err)
-    s = dict(data.get("settings", {}))
+    s = dict(data["settings"]) if isinstance(data.get("settings"), dict) else {}
     legacy_fx = s.pop("effect", None)  # 1.1: a single effect
     raw_profiles = s.pop("profiles", None)
-    names = {f.name for f in fields(Settings)}
-    settings = Settings(**{k: v for k, v in s.items() if k in names})
+    settings = Settings(**typed_fields(Settings, s))
     if isinstance(raw_profiles, list) and raw_profiles:
         settings.profiles = [Profile.from_dict(p) for p in raw_profiles if isinstance(p, dict)]
     elif isinstance(legacy_fx, dict):
@@ -224,7 +231,8 @@ def load(path: Path | None = None) -> AppConfig:
     if settings.latency_mode not in ("auto", "manual", "off"):
         settings.latency_mode = "auto"
     settings.latency_ms = max(0, min(3000, int(settings.latency_ms)))
-    if int(s.get("config_rev", 0) or 0) < 2:
+    settings.fps = max(1.0, min(60.0, float(settings.fps)))
+    if settings.config_rev < 2 or "config_rev" not in s:
         # 1.9.12: "Kolor" was only the default; lights that can change colors
         # instantly (music/control data) now do so - they no longer fade behind.
         for dev in devices:
@@ -232,16 +240,27 @@ def load(path: Path | None = None) -> AppConfig:
                 dev.method = "auto"
         settings.config_rev = 2
     session: dict[str, Any] = {}
-    if data.get("tuya_session"):
+    if isinstance(data.get("tuya_session"), str) and data["tuya_session"]:
         try:
             session = json.loads(dpapi.unprotect(data["tuya_session"]))
         except (OSError, ValueError, TypeError) as err:
             _LOGGER.warning("Saved Tuya login unreadable: %s", err)
     return AppConfig(
         devices=devices, settings=settings,
-        username=data.get("username", ""), user_code=data.get("user_code", ""),
+        username=str(data.get("username") or ""), user_code=str(data.get("user_code") or ""),
         tuya_session=session,
     )
+
+
+def _keep_aside(path: Path) -> None:
+    """A settings file that can't be read is kept (the next save would replace
+    it, losing the lights, their keys and the Tuya login)."""
+    try:
+        backup = path.with_name(path.name + ".bad")
+        backup.write_bytes(path.read_bytes())
+        _LOGGER.error("The unreadable settings file was kept as %s", backup)
+    except OSError as err:
+        _LOGGER.error("Cannot keep the unreadable settings file: %s", err)
 
 
 def save(config: AppConfig, path: Path | None = None) -> None:
@@ -262,4 +281,13 @@ def save(config: AppConfig, path: Path | None = None) -> None:
     # unique temp name: saves may happen from the UI and a worker thread at once
     tmp = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(5):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            # Windows: another save replacing it right now, or antivirus reading it
+            if attempt == 4:
+                tmp.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05 * (attempt + 1))

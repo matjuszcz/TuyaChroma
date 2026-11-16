@@ -59,8 +59,11 @@ class EffectPlayer(threading.Thread):
         self._stop_event.set()
         self.join(timeout)
 
+    SEND_RETRY = 2.0  # s after a failed send before the SDK is opened again
+
     def run(self) -> None:
         next_try = 0.0
+        self._send_failed_at = None
         try:
             while not self._stop_event.is_set():
                 started = time.monotonic()
@@ -82,6 +85,10 @@ class EffectPlayer(threading.Thread):
                             self._output.close()
                             self._output = None
                         next_try = 0.0
+                    if self._send_failed_at is not None:
+                        # the SDK/service went away: don't reopen it every frame
+                        next_try = max(next_try, self._send_failed_at + self.SEND_RETRY)
+                        self._send_failed_at = None
                     if self._output is None and started >= next_try:
                         try:
                             self._output = self._factory()
@@ -114,6 +121,7 @@ class EffectPlayer(threading.Thread):
             self._output.send_frames(frames)
         except Exception as err:  # noqa: BLE001 - SDK/service went away
             _LOGGER.warning("Chroma SDK error: %s", err)
+            self._send_failed_at = time.monotonic()
             try:
                 self._output.close()
             finally:

@@ -159,13 +159,18 @@ RECLAIM_TRIES = 5  # games may show effects only after loading
 
 
 def is_game_active(frames: dict[str, Frame | None], apps: ChromaApps | None,
-                   own_pid: int, full_sync: bool) -> bool:
+                   own_pid: int, full_sync: bool,
+                   alive: Callable[[int], bool] | None = None) -> bool:
     """Does a game (another Chroma app) control the lighting right now?"""
     any_active = any(f is not None and f.active for f in frames.values())
     if not any_active:
         return False
     if apps is not None and apps.current_pid:
-        return apps.current_pid != own_pid  # Synapse shows another app's effect
+        if apps.current_pid == own_pid:
+            return False
+        # Synapse shows another app's effect - unless that app is gone (a game
+        # that crashed stays "current" with its last frame in the memory)
+        return alive is None or alive(apps.current_pid)
     # No app list: in full sync our own effect is in the frames, so we can't tell.
     return not full_sync
 
@@ -782,7 +787,7 @@ class SyncService:
                     if self.player is not None:
                         # Full sync: a game is running - hand it the Razer devices.
                         self.player.yielded = full_sync and bool(games)
-                    raw_game = is_game_active(frames, apps, self._own_pid, full_sync)
+                    raw_game = is_game_active(frames, apps, self._own_pid, full_sync, alive)
                     if raw_game:
                         game_seen = now
                         held_name = apps.current_name if apps else ""

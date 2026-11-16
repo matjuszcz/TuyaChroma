@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+import logging
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 EFFECTS = [
     "wave", "spectrum", "breathing", "static", "wheel",
@@ -32,8 +35,7 @@ class Profile:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Profile:
-        names = {f.name for f in fields(cls)}
-        p = cls(**{k: v for k, v in data.items() if k in names})
+        p = cls(**typed_fields(cls, data))
         p.sanitize()
         return p
 
@@ -47,6 +49,34 @@ class Profile:
         self.speed = max(1, min(10, int(self.speed)))
         self.density = max(1, min(10, int(self.density)))
         self.brightness = max(0.05, min(1.0, float(self.brightness)))
+
+
+def typed_fields(cls, data: dict[str, Any]) -> dict[str, Any]:
+    """The dataclass's fields from saved data, skipping values of the wrong type
+    (a damaged or hand-edited config.json): those keep their default."""
+    out: dict[str, Any] = {}
+    for f in fields(cls):
+        if f.name not in data:
+            continue
+        value, kind = data[f.name], str(f.type).split("[")[0].strip()
+        if kind == "bool":
+            ok = isinstance(value, bool)
+        elif kind in ("int", "float"):
+            ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+            if ok and kind == "int":
+                value = int(round(value))
+        elif kind in _KINDS:
+            ok = isinstance(value, _KINDS[kind])
+        else:
+            ok = True  # Any, nested types: checked where they are used
+        if ok:
+            out[f.name] = value
+        else:
+            _LOGGER.warning("Config: ignoring %s.%s = %r (wrong type)", cls.__name__, f.name, value)
+    return out
+
+
+_KINDS = {"str": str, "list": list, "dict": dict}
 
 
 def default_profiles() -> list[Profile]:
