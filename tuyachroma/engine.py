@@ -449,7 +449,7 @@ class SyncService:
         with self._lock:
             deadline = time.monotonic() + timeout
             self._stop.set()
-            for w in self.workers:
+            for w in self.workers + self._retiring:
                 w.request_stop()
             if self._hook is not None:
                 self._hook.stop()
@@ -457,7 +457,7 @@ class SyncService:
             if self.player is not None:
                 self.player.stop(max(0.1, deadline - time.monotonic()))
                 self.player = None
-            for w in self.workers:
+            for w in self.workers + self._retiring:
                 w.join(max(0.1, deadline - time.monotonic()))
             # still restoring (slow bulb): remember them so a restart doesn't collide
             self._retiring += [w for w in self.workers if _alive(w)]

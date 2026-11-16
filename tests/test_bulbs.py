@@ -339,3 +339,38 @@ def test_light_switched_off_on_purpose_stays_off_after_reconnect() -> None:
     worker._connect()
     worker._send((255, 0, 0))
     assert "20" not in bulb.sent[-1][1]
+
+
+def test_unconfirmed_restore_is_tried_again() -> None:
+    """A light that skipped the answer to the restore must not stay on the Razer color."""
+    worker, bulb = make_worker(music=False)
+    try:
+        worker.set_color((255, 0, 0))
+        assert wait_for(lambda: worker.status == STATUS_SYNC)
+        real = bulb.set_multiple_values
+        skipped = {"left": 1}
+
+        def flaky(values, nowait=False):
+            real(values, nowait)
+            if values.get("21") == "white" and skipped["left"]:
+                skipped["left"] -= 1
+                return {"Error": "Timeout", "Err": "902", "Payload": None}
+            return None
+
+        bulb.set_multiple_values = flaky
+        worker.release()
+        assert wait_for(lambda: skipped["left"] == 0 and worker.status == STATUS_READY, 12)
+        restores = [v for k, v in bulb.sent if k == "multi" and v.get("21") == "white"]
+        assert len(restores) == 2  # tried again after reconnecting
+    finally:
+        worker.stop(2)
+
+
+def test_takeover_uses_the_connection_state_if_the_read_is_skipped() -> None:
+    bulb = FakeBulb(music=False)
+    cfg = BulbConfig(name="lamp", id="x", ip="1.2.3.4", local_key="k", min_interval=0.05)
+    worker = BulbWorker(cfg, device_factory=lambda _cfg: bulb)
+    worker._connect()
+    bulb.status = lambda: {"Error": "Timeout", "Err": "902", "Payload": None}
+    worker._send((255, 0, 0))
+    assert worker._original.get("mode") == "white" and worker._original.get("switch") is True

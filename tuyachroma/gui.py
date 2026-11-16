@@ -1088,19 +1088,22 @@ class App:
             if not bulb.dpset.get("colour"):
                 return f"{dev.name}: ta żarówka nie obsługuje kolorów RGB"
             original = bulb.state()
-            for rgb in ((255, 0, 0), (0, 255, 0), (0, 0, 255)):
-                bulb.set_colour(*rgb)
-                time.sleep(0.8)
-            bulb.set_multiple_values({
-                bulb.dpset[k]: original[k]
-                for k in ("switch", "mode", "brightness", "colourtemp", "colour")
-                if bulb.dpset.get(k) and original.get(k) is not None
-            })
-            bulb.close()
+            try:
+                for rgb in ((255, 0, 0), (0, 255, 0), (0, 0, 255)):
+                    bulb.set_colour(*rgb)
+                    time.sleep(0.8)
+            finally:  # give it back also when a color failed
+                bulb.set_multiple_values({
+                    bulb.dpset[k]: original[k]
+                    for k in ("switch", "mode", "brightness", "colourtemp", "colour")
+                    if bulb.dpset.get(k) and original.get(k) is not None
+                })
+                bulb.close()
             return f"{dev.name}: OK (protokół {version})"
         finally:
             save(self.config)
-            if was_running and self.config.settings.sync_enabled:  # not paused meanwhile
+            if (was_running and self.config.settings.sync_enabled  # not paused meanwhile
+                    and not self._quitting):
                 self.service.start(self.config)
 
     # -------------------------------------------------------- razer devices
@@ -1367,12 +1370,18 @@ class App:
             updater.apply_update(release)
 
         def failed(err: Exception) -> None:
+            self._installing = False
             self.update_button.configure(state="normal")
             self.set_busy(f"Aktualizacja nie powiodła się: {err}")
             if self.config.settings.sync_enabled:
                 self.run_bg(lambda: self.service.start(self.config))
 
-        self.run_bg(run, lambda _r: self.quit(), failed)
+        def done(_r) -> None:
+            self._installing = False
+            self.quit()
+
+        self._installing = True
+        self.run_bg(run, done, failed)
 
     def update_device_db(self, manual: bool = True) -> None:
         if manual:
@@ -1818,6 +1827,11 @@ class App:
             self.run_bg(lambda: self.service.start(self.config))
 
     def quit(self) -> None:
+        if getattr(self, "_installing", False):
+            # quitting between removing the old exe and moving in the new one
+            # would leave no program at all: quit when the update is done
+            self.set_busy("Instaluję aktualizację – program zamknie się sam za chwilę…")
+            return
         if self._quitting:
             return
         self._quitting = True

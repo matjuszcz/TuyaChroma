@@ -121,3 +121,22 @@ def test_advisor_gives_the_speed_back() -> None:
                                             "rate_not_the_cause": True, "dropped_off": 0.0}})
     assert [(c.field, c.new) for c in advice.changes] == [("min_interval", 0.3)]
     assert any("zasilacz" in n for n in advice.notes)
+
+
+def test_renewing_keeps_the_lights_own_effect_playing(monkeypatch) -> None:
+    """Renewal before the light resets itself must not restart its scene (a jump)."""
+    _clean(monkeypatch)
+    bulbs._max_age["s"] = 0.2
+    bulb = FakeBulb(music=False)
+    worker = BulbWorker(BulbConfig(name="bar", id="s", ip="1", local_key="k", min_interval=0.02),
+                        device_factory=lambda _cfg: bulb)
+    scene = bulbs.NativeScene.from_state({"21": "scene", "25": "abcdef"})
+    worker.start()
+    try:
+        assert wait_for(lambda: worker.connected)
+        worker.set_scene(scene)
+        time.sleep(1.0)  # several renewals
+    finally:
+        worker.stop(2)
+    scenes = [v for k, v in bulb.sent if k == "multi" and v.get("21") == "scene"]
+    assert len(scenes) == 1

@@ -235,6 +235,7 @@ class BulbWorker(threading.Thread):
         self._capture: tuple[threading.Event, dict] | None = None
         self._reported = False
         self._resend_full = False  # the light lost our mode: send switch + mode with the color
+        self._connect_dps: dict = {}
         self._connected_at = 0.0
 
     # ------------------------------------------------------------ public API
@@ -272,6 +273,8 @@ class BulbWorker(threading.Thread):
 
     def hold(self, on: bool) -> None:
         """Stop sending anything (the user is setting the light in the Tuya app)."""
+        if self._hold and not on:
+            self._resend_full = True  # the Tuya app may have left it in another mode
         self._hold = on
         self._wake.set()
 
@@ -367,6 +370,7 @@ class BulbWorker(threading.Thread):
                 return
             except Exception as err:  # noqa: BLE001 - network errors of all kinds
                 failures += 1
+                renewing = False
                 offline = isinstance(err, (BulbOffline, TimeoutError))
                 if failures == 1:
                     _LOGGER.warning("%s: %s%s", self.cfg.name, err,
@@ -378,13 +382,20 @@ class BulbWorker(threading.Thread):
                 # 5 s, 10 s, then every 15 s: a switched-off bulb
                 # costs nothing, and one switched on is taken over ~15 s after it joins Wi-Fi.
                 self._stopping.wait(min(RETRY_FIRST * 2 ** (failures - 1), RETRY_MAX))
-        try:
-            if self._in_sync_mode:
-                if self._dev is None:
-                    self._connect()
-                self._restore()
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("%s: could not restore state: %s", self.cfg.name, err)
+        for attempt in range(2):
+            try:
+                if self._in_sync_mode:
+                    if self._dev is None:
+                        self._connect()
+                    else:
+                        # don't follow the last color too fast (some lights drop it)
+                        time.sleep(min(self._interval(), 0.5))
+                    self._restore()
+                break
+            except Exception as err:  # noqa: BLE001
+                self._disconnect()
+                if attempt:
+                    _LOGGER.warning("%s: could not restore state: %s", self.cfg.name, err)
         self._disconnect()
 
     def _connect(self, quiet: bool = False) -> None:
@@ -418,9 +429,13 @@ class BulbWorker(threading.Thread):
             self.fade_ms = COLOUR_FADE_MS
         if method == "music" and not dev.dpset.get("music"):
             _LOGGER.warning("%s: music mode not supported, using colour mode", self.cfg.name)
-        self._sent = None
-        self._last_value = None  # unknown after (re)connecting: send in full
-        self._scene_sent = None  # a light that rebooted lost its effect: send it again
+        if not self._in_sync_mode:
+            self._connect_dps = dict(status["dps"])  # how HA left it (a fallback for the takeover)
+        if not quiet:
+            self._sent = None
+            self._last_value = None  # unknown after (re)connecting: send in full
+            self._scene_sent = None  # a light that rebooted lost its effect: send it again
+        # (a planned renewal: the light kept its state - a scene keeps playing smoothly)
         # _in_sync_mode survives reconnects: the bulb may still show our color -
         # unless it came back in another mode (powered off and on at the wall:
         # white; or music mode after leaving it): then the mode is sent again.
@@ -486,8 +501,9 @@ class BulbWorker(threading.Thread):
                 # Always, also while colors are flowing: some lights expect it.
                 check_reply(self._dev.heartbeat(nowait=False), "heartbeat")
                 last_beat = now
-            if self._capture is not None:
-                done, result = self._capture
+            capture = self._capture
+            if capture is not None:
+                done, result = capture
                 self._capture = None
                 try:
                     reply = self._dev.status()
@@ -499,6 +515,9 @@ class BulbWorker(threading.Thread):
             if self._hold:
                 continue  # the heartbeat above keeps the connection alive
             if restore:
+                gap = self._interval() - (time.monotonic() - last_send)
+                if gap > 0:
+                    time.sleep(min(gap, 1.0))  # right after a color, some lights drop it
                 self._restore()
                 self._scene_sent = None
                 continue
@@ -619,8 +638,14 @@ class BulbWorker(threading.Thread):
                 self._original = {
                     k: state.get(k) for k in RESTORE_KEYS if state.get(k) is not None
                 }
+        elif self._connect_dps:
+            # (a skipped answer) the state read when connecting a moment ago
+            self._original = {k: self._connect_dps.get(str(dev.dpset[k])) for k in RESTORE_KEYS
+                              if dev.dpset.get(k) and self._connect_dps.get(str(dev.dpset[k])) is not None}
+            _LOGGER.info("%s: state before takeover from the connection: %s", self.cfg.name,
+                         self._original)
         else:
-            _LOGGER.warning("%s: could not read state before takeover: %s", self.cfg.name, fresh)
+            raise ConnectionError(f"could not read state before takeover: {fresh}")
 
     def _send_scene(self, scene: NativeScene) -> None:
         dev = self._dev
@@ -681,7 +706,11 @@ class BulbWorker(threading.Thread):
         dps = self._dev.dpset
         values = {dps[k]: v for k, v in self._original.items() if dps.get(k)}
         if values:
-            self._dev.set_multiple_values(values, nowait=False)
+            # not confirmed: an error -> reconnect, and the restore is tried again
+            check_reply(self._dev.set_multiple_values(values, nowait=False), "restore")
+        else:
+            _LOGGER.warning("%s: state before takeover unknown - nothing to give back", self.cfg.name)
+        self._original = {}
         self._in_sync_mode = False
         self._sent = None
         self._last_value = None
