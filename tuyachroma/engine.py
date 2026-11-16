@@ -340,6 +340,7 @@ class SyncService:
         own_pid: int | None = None,
         layout_detector: Callable[[], str] | None = None,
     ) -> None:
+        # looked up at call time, so tests can replace detect_keyboard_layout
         self._layout_detector = layout_detector or (lambda: detect_keyboard_layout())
         self.keyboard_layout = "full"
         self._reader_factory = reader_factory

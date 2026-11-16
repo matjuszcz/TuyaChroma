@@ -640,8 +640,9 @@ class BulbWorker(threading.Thread):
                 }
         elif self._connect_dps:
             # (a skipped answer) the state read when connecting a moment ago
-            self._original = {k: self._connect_dps.get(str(dev.dpset[k])) for k in RESTORE_KEYS
-                              if dev.dpset.get(k) and self._connect_dps.get(str(dev.dpset[k])) is not None}
+            state = {k: self._connect_dps.get(str(dev.dpset[k])) for k in RESTORE_KEYS
+                     if dev.dpset.get(k)}
+            self._original = {k: v for k, v in state.items() if v is not None}
             _LOGGER.info("%s: state before takeover from the connection: %s", self.cfg.name,
                          self._original)
         else:

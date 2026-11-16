@@ -172,9 +172,11 @@ def keep_session_alive(session: dict[str, Any],
         _LOGGER.info("Tuya login renewal: no answer (%s), will retry", type(err).__name__)
         return None
     if not isinstance(response, dict) or not response.get("success"):
-        _LOGGER.warning("Tuya login renewal refused: code=%s msg=%s",
-                        *((response.get("code"), response.get("msg")) if isinstance(response, dict)
-                          else (type(response).__name__, "")))
+        if isinstance(response, dict):
+            _LOGGER.warning("Tuya login renewal refused: code=%s msg=%s",
+                            response.get("code"), response.get("msg"))
+        else:
+            _LOGGER.warning("Tuya login renewal refused: %s", type(response).__name__)
         return False
     result = response.get("result", {})
     _token_listener(dict(session), on_token).update_token({
