@@ -7,6 +7,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import tempfile
@@ -35,8 +36,45 @@ def setup_logging(verbose: bool) -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=handlers,
     )
+    for handler in handlers:
+        handler.addFilter(RedactSecrets())
+    # The Tuya cloud SDK logs whole decrypted responses (local keys, tokens) at
+    # debug level, and urllib3 logs request URLs (the token renewal URL holds the
+    # refresh token): never let those into a log the owner may share.
+    logging.getLogger("tuya_sharing").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
     if not verbose:
         logging.getLogger("tinytuya").setLevel(logging.WARNING)
+
+
+# Secrets that libraries may put in log lines or error texts
+_SECRET = re.compile(
+    r"(/v1\.0/m/token/)[^\s'\"),]+"
+    r"|((?:local[_ ]?key|localKey|session key|access_?token|accessToken|refresh_?token|refreshToken)"
+    r"['\"]?\s*(?:[:=]|correct\?)?\s*['\"]?)[^'\",\s})]+",
+    re.I)
+
+
+def redact(text: str) -> str:
+    return _SECRET.sub(lambda m: (m.group(1) or m.group(2)) + "***", text)
+
+
+class RedactSecrets(logging.Filter):
+    """Masks Tuya keys and tokens in every log record (log.txt gets shared)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001 - a bad format string: leave it to the handler
+            return True
+        clean = redact(message)
+        if clean != message:
+            record.msg, record.args = clean, ()
+        if record.exc_info and record.exc_info[1] is not None and not record.exc_text:
+            record.exc_text = redact(logging.Formatter().formatException(record.exc_info))
+        elif record.exc_text:
+            record.exc_text = redact(record.exc_text)
+        return True
 
 
 def install_error_logging() -> None:
