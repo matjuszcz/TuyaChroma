@@ -269,11 +269,18 @@ class App:
 
     # ------------------------------------------------------------ live strip
 
+    def _window_shown(self) -> bool:
+        """Open on screen: "normal" or maximized ("zoomed" on Windows)."""
+        try:
+            return self.root.state() not in ("withdrawn", "iconic")
+        except tk.TclError:
+            return False
+
     def _strip_loop(self) -> None:
         if self._quitting:
             return
         try:
-            if self.root.state() == "normal":  # not while in the tray (most of the time)
+            if self._window_shown():  # not while in the tray (most of the time)
                 self._paint_strip()
         finally:
             self.root.after(250, self._strip_loop)
@@ -742,7 +749,7 @@ class App:
 
     def _preview_visible(self) -> bool:
         try:
-            return (self.root.state() == "normal"
+            return (self._window_shown()
                     and self.notebook.index(self.notebook.select()) == self._profiles_tab_index)
         except tk.TclError:
             return False

@@ -925,17 +925,29 @@ def test_window_shows_the_color_of_this_moment() -> None:
     assert colors["l1"] == "scene" and colors["l2"] is None
     service.game_active = True          # game colors are live anyway: what was sent
     assert service.bulb_colors()["l0"] == (1, 2, 3)
+    service.game_active = False
+    service._profile = Profile(effect="ambient")  # no screen grab on the window's thread
+    renderer.screen = lambda w, h: (_ for _ in ()).throw(AssertionError("screen grabbed"))
+    assert service.bulb_colors()["l0"] == (1, 2, 3)
 
 
 def test_status_level() -> None:
+    """The level comes with each status, not from reading its words."""
     service = engine.SyncService(layout_detector=lambda: "full", own_pid=OWN)
-    for status, level in (("pełna synchronizacja – profil „Wave”", "ok"),
-                          ("gra działa (bf6.exe) – urządzenia Razer oddane grze", "ok"),
-                          ("Razer niedostępny: Synapse not running", "error"),
-                          ("błąd odczytu Razer (szczegóły w logu) – ponawiam…", "error"),
-                          ("zatrzymane", "warn")):
-        service.razer_status = status
-        assert service.status_level() == level, status
-    service.razer_status = "pełna synchronizacja – profil „Wave”"
+    assert service.status_level() == "warn"  # stopped
+    player = type("P", (), {"yielded": False, "output_status": ""})()
+    service.player = player
+    assert service._status_text("full", "Wave") == ("pełna synchronizacja – profil „Wave”", "ok")
+    player.yielded = True
+    assert service._status_text("full", "Wave")[1] == "ok"
+    player.yielded, player.output_status = False, "Chroma SDK niedostępne (1062)"
+    assert service._status_text("full", "Wave") == ("Chroma SDK niedostępne (1062)", "error")
+    player.output_status = ""
     service.razer_kept_by_synapse = True
+    assert service._status_text("full", "Wave")[1] == "error"
+    service.razer_kept_by_synapse = False
+    assert service._status_text("effect", "Wave")[1] == "ok"
+    service.game_active = True
+    assert service._status_text("full", "Wave")[1] == "ok"
+    service._set_status("Razer niedostępny: Synapse not running", "error")
     assert service.status_level() == "error"

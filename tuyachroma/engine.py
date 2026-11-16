@@ -351,6 +351,8 @@ class SyncService:
         self.player: EffectPlayer | None = None
         self._hook = None
         self.razer_status = "zatrzymane"
+        self.razer_level = "warn"  # "ok" / "warn" / "error", set with every status
+        self._settings = None
         self.game_active = False
         self.game_name = ""
         self.other_apps: dict[int, str] = {}  # running Chroma apps treated as games
@@ -457,7 +459,7 @@ class SyncService:
                 self._thread.join(max(0.1, deadline - time.monotonic()))
             self._thread = None
             self.workers = []
-            self.razer_status = "zatrzymane"
+            self._set_status("zatrzymane", "warn")
             self.game_active = False
             self.game_name = ""
             _LOGGER.info("Sync stopped")
@@ -563,13 +565,15 @@ class SyncService:
 
     # Effects whose color at a moment depends only on the time (rendering them for
     # the window doesn't disturb the lights' own rendering state)
-    STATELESS_EFFECTS = {"static", "spectrum", "breathing", "wave", "wheel", "ambient"}
+    # (Ambient isn't one: rendering it grabs the screen, which mustn't run on the
+    # window's thread; the window shows the screen colors last sent instead.)
+    STATELESS_EFFECTS = {"static", "spectrum", "breathing", "wave", "wheel"}
 
     def bulb_colors(self) -> dict[str, RGB | str | None]:
         """What each light shows now, for the window: a color, "scene" (its own
         effect) or None (not showing ours). Lights are sent effect colors ahead of
         time; the window shows the color of this moment, like the Razer devices."""
-        player, profile, settings = self.player, self._profile, getattr(self, "_settings", None)
+        player, profile, settings = self.player, self._profile, self._settings
         workers = list(self.workers)
         now = time.monotonic()
         live = (player is not None and profile is not None and settings is not None
@@ -683,7 +687,7 @@ class SyncService:
 
     def _run(self, sources: list[str], settings) -> None:
         if not sources:
-            self.razer_status = "nie wybrano żadnej żarówki"
+            self._set_status("nie wybrano żadnej żarówki", "warn")
             return
         idle = settings.idle
         full_sync = idle == "full"
@@ -725,9 +729,9 @@ class SyncService:
                     if reader is None:
                         try:
                             reader = self._reader_factory(sources)
-                            self.razer_status = "połączono z Razer Chroma"
+                            self._set_status("połączono z Razer Chroma", "ok")
                         except (RazerUnavailable, OSError) as err:
-                            self.razer_status = f"Razer niedostępny: {err}"
+                            self._set_status(f"Razer niedostępny: {err}", "error")
                             self._stop.wait(5)
                             continue
                     started = time.monotonic()
@@ -741,7 +745,7 @@ class SyncService:
                         frames = {src: reader.read(src) for src in sources}
                         apps = reader.read_apps() if hasattr(reader, "read_apps") else None
                     except OSError as err:
-                        self.razer_status = f"utracono połączenie: {err}"
+                        self._set_status(f"utracono połączenie: {err}", "error")
                         reader.close()
                         reader = None
                         continue
@@ -860,7 +864,7 @@ class SyncService:
                     dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
                              profile, clock.allow, KEYBOARD_AREAS[self.keyboard_layout], effect_color,
                              effect_source)
-                    self.razer_status = self._status_text(idle, profile.name)
+                    self._set_status(*self._status_text(idle, profile.name))
                     spent = time.monotonic() - started
                     if spent < period:
                         self._stop.wait(period - spent)
@@ -870,7 +874,7 @@ class SyncService:
                     if repr(err) != last_error:
                         _LOGGER.exception("Sync loop error - retrying in 5 s")
                         last_error = repr(err)
-                    self.razer_status = "błąd odczytu Razer (szczegóły w logu) – ponawiam…"
+                    self._set_status("błąd odczytu Razer (szczegóły w logu) – ponawiam…", "error")
                     self._release_all()
                     if reader is not None:
                         try:
@@ -883,32 +887,30 @@ class SyncService:
             if reader is not None:
                 reader.close()  # releases the mutexes from the owning thread
 
+    def _set_status(self, text: str, level: str) -> None:
+        self.razer_level = level
+        self.razer_status = text
+
     def status_level(self) -> str:
         """"ok", "warn" or "error" for razer_status (the window's status dot)."""
-        status = self.razer_status
-        if getattr(self, "razer_kept_by_synapse", False) or status.startswith(
-                ("Razer niedostępny", "błąd", "utracono", "Chroma SDK niedostępne")):
-            return "error"
-        if self.game_active or status.startswith(
-                ("pełna synchronizacja", "brak gry", "gra działa", "połączono", "efekt z gry")):
-            return "ok"
-        return "warn"
+        return self.razer_level
 
-    def _status_text(self, idle: str, profile_name: str) -> str:
+    def _status_text(self, idle: str, profile_name: str) -> tuple[str, str]:
+        """The status line and its level."""
         if self.game_active:
             name = f" ({self.game_name})" if self.game_name else ""
-            return f"efekt z gry aktywny{name}"
+            return f"efekt z gry aktywny{name}", "ok"
         if idle == "full":
             player = self.player
             if getattr(self, "razer_kept_by_synapse", False):
                 return ("urządzenia Razer zostały przy profilu Synapse – w Synapse: Chroma → "
-                        "Aplikacje Chroma, zezwól TuyaChroma")
+                        "Aplikacje Chroma, zezwól TuyaChroma"), "error"
             if player is not None and player.yielded:
                 names = ", ".join(getattr(self, "other_apps", {}).values())
-                return f"gra działa ({names}) – urządzenia Razer oddane grze"
+                return f"gra działa ({names}) – urządzenia Razer oddane grze", "ok"
             if player is not None and "niedostępne" in player.output_status:
-                return player.output_status  # e.g. Chroma Apps disabled in Synapse
-            return f"pełna synchronizacja – profil „{profile_name}”"
+                return player.output_status, "error"  # e.g. Chroma Apps disabled in Synapse
+            return f"pełna synchronizacja – profil „{profile_name}”", "ok"
         if idle == "effect":
-            return f"brak gry – profil „{profile_name}” na żarówkach"
-        return "połączono, czekam na grę"
+            return f"brak gry – profil „{profile_name}” na żarówkach", "ok"
+        return "połączono, czekam na grę", "ok"

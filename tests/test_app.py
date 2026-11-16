@@ -1173,6 +1173,9 @@ def test_live_strip_shows_each_lights_color(tmp_path, monkeypatch) -> None:
         app.root.update()
         app._strip_loop()
         assert painted == [1]
+        monkeypatch.setattr(app.root, "state", lambda: "zoomed")  # maximized on Windows
+        app._strip_loop()
+        assert painted == [1, 1]
         monkeypatch.undo()
         monkeypatch.setenv("APPDATA", str(tmp_path))
         for d in config.devices:
