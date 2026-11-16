@@ -787,6 +787,13 @@ def test_buttons_visible_in_every_tab(tmp_path, monkeypatch) -> None:
                 assert b.winfo_width() >= 40, f"{text} squeezed"
                 seen.add(text)
         assert must_see <= seen
+        # the status/messages line under the tabs stays visible too
+        status = next(w for w in app.root.winfo_children()
+                      if isinstance(w, ttk.Frame) and any(
+                          str(c.cget("text")).startswith("v") for c in w.winfo_children()
+                          if isinstance(c, ttk.Label)))
+        assert status.winfo_ismapped() and status.winfo_height() > 5
+        assert status.winfo_rooty() + status.winfo_height() <= win_bottom
     finally:
         service.stop()
         app._quitting = True
@@ -1165,16 +1172,20 @@ def test_live_strip_shows_each_lights_color(tmp_path, monkeypatch) -> None:
         assert len(fills) > 5
         painted = []
         monkeypatch.setattr(app, "_paint_strip", lambda: painted.append(1))
+        # (counted around each call: the strip's own 250 ms timer may also run in update())
         app.root.withdraw()  # in the tray: no repainting
+        n = len(painted)
         app._strip_loop()
-        assert painted == []
+        assert len(painted) == n
         app.root.deiconify()
         app.root.update()
+        n = len(painted)
         app._strip_loop()
-        assert painted == [1]
+        assert len(painted) == n + 1
         monkeypatch.setattr(app.root, "state", lambda: "zoomed")  # maximized on Windows
+        n = len(painted)
         app._strip_loop()
-        assert painted == [1, 1]
+        assert len(painted) == n + 1
         monkeypatch.undo()
         monkeypatch.setenv("APPDATA", str(tmp_path))
         for d in config.devices:

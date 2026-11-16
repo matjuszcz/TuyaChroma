@@ -8,6 +8,7 @@ Windows version (the native "vista" theme ignores most of them).
 
 from __future__ import annotations
 
+import math
 import sys
 import tkinter as tk
 from tkinter import font as tkfont
@@ -22,7 +23,7 @@ PALETTES = {
         "SELECT": "#3A4560",   # selected row
         "LINE": "#373D49",     # borders, separators
         "INK": "#ECEEF2",      # text
-        "MUTED": "#9AA2AF",    # secondary text
+        "MUTED": "#A7AFBB",    # secondary text
         "IDLE": "#6B7380",
         "OK": "#5BCB93",
         "WARN": "#E8B65A",
@@ -38,9 +39,9 @@ PALETTES = {
         "LINE": "#D5DAE1",
         "INK": "#1D232C",
         "MUTED": "#5C6673",
-        "IDLE": "#8A939E",
+        "IDLE": "#7C8590",
         "OK": "#2F7D4F",
-        "WARN": "#A86E12",
+        "WARN": "#8A5A0E",
         "ERROR": "#B23A3A",
         "PREVIEW": "#16181D",
     },
@@ -175,27 +176,42 @@ def apply(root: tk.Tk, scale: float = 1.0) -> dict[str, tuple]:
                   fieldbackground=[("readonly", SURFACE), ("disabled", CANVAS)],
                   foreground=[("disabled", IDLE)], background=[("active", HOVER)])
     for widget in ("TCheckbutton", "TRadiobutton"):
-        style.configure(widget, background=CANVAS, foreground=INK, indicatorcolor=SURFACE,
-                        indicatorbackground=SURFACE, upperbordercolor=LINE, lowerbordercolor=LINE)
+        # (clam draws the tick / dot in indicatorforeground)
+        style.configure(widget, background=CANVAS, foreground=INK, indicatorforeground=INK,
+                        indicatorbackground=SURFACE, upperbordercolor=IDLE, lowerbordercolor=IDLE)
         style.map(widget, background=[("active", CANVAS)],
-                  indicatorcolor=[("selected", INK), ("pressed", SELECT)])
-    style.configure("Horizontal.TScale", background=RAISED, troughcolor=SURFACE, bordercolor=LINE,
-                    lightcolor=RAISED, darkcolor=RAISED)
-    style.map("Horizontal.TScale", background=[("active", HOVER)])
+                  indicatorbackground=[("pressed", SELECT), ("disabled", CANVAS)],
+                  indicatorforeground=[("disabled", IDLE)])
+    # Slider and scrollbar thumbs: clearly visible on their track (>= 3:1)
+    style.configure("Horizontal.TScale", background=IDLE, troughcolor=SURFACE, bordercolor=IDLE,
+                    lightcolor=IDLE, darkcolor=IDLE, gripcount=0)
+    style.map("Horizontal.TScale", background=[("active", MUTED)],
+              lightcolor=[("active", MUTED)], darkcolor=[("active", MUTED)])
     for orient in ("Vertical", "Horizontal"):
-        style.configure(f"{orient}.TScrollbar", background=RAISED, troughcolor=CANVAS,
-                        bordercolor=CANVAS, lightcolor=RAISED, darkcolor=RAISED, arrowcolor=MUTED,
+        style.configure(f"{orient}.TScrollbar", background=IDLE, troughcolor=CANVAS,
+                        bordercolor=CANVAS, lightcolor=IDLE, darkcolor=IDLE, arrowcolor=MUTED,
                         gripcount=0)
-        style.map(f"{orient}.TScrollbar", background=[("active", HOVER)])
+        style.map(f"{orient}.TScrollbar", background=[("active", MUTED)],
+                  lightcolor=[("active", MUTED)], darkcolor=[("active", MUTED)])
     style.configure("TSeparator", background=LINE)
     return fonts
 
 
+def _luminance(rgb) -> float:
+    """WCAG relative luminance."""
+    def channel(c: float) -> float:
+        c /= 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (channel(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
 def readable_on(rgb: tuple[int, int, int]) -> str:
-    """Dark or light text, whichever reads better on this color."""
-    r, g, b = rgb
-    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-    return "#15181E" if luminance > 140 else "#FFFFFF"
+    """Dark or white text, whichever has more contrast on this color."""
+    lum = _luminance(rgb)
+    dark = (lum + 0.05) / (_luminance((0x15, 0x18, 0x1E)) + 0.05)
+    white = 1.05 / (lum + 0.05)
+    return "#15181E" if dark >= white else "#FFFFFF"
 
 
 def hex_color(rgb: tuple[int, int, int]) -> str:
@@ -210,11 +226,16 @@ def mix(rgb: tuple[int, int, int], other: str, amount: float) -> str:
 
 def rounded_rect(canvas: tk.Canvas, x0: float, y0: float, x1: float, y1: float, r: float,
                  **kw) -> int:
-    """A rectangle with round corners (Tk has none)."""
+    """A rectangle with round corners of radius r (a capsule when r is half the
+    height); Tk has none, so the corners are drawn as short polylines."""
     r = max(0.0, min(r, (x1 - x0) / 2, (y1 - y0) / 2))
-    points = (x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1,
-              x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0)
-    return canvas.create_polygon(points, smooth=True, **kw)
+    points: list[float] = []
+    for cx, cy, start in ((x1 - r, y0 + r, -90), (x1 - r, y1 - r, 0), (x0 + r, y1 - r, 90),
+                          (x0 + r, y0 + r, 180)):
+        for k in range(7):
+            angle = math.radians(start + k * 15)
+            points += (cx + r * math.cos(angle), cy + r * math.sin(angle))
+    return canvas.create_polygon(points, **kw)
 
 
 def dark_title_bar(root: tk.Tk) -> None:

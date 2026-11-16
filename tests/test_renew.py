@@ -128,8 +128,9 @@ def test_renewing_keeps_the_lights_own_effect_playing(monkeypatch) -> None:
     _clean(monkeypatch)
     bulbs._max_age["s"] = 0.2
     bulb = FakeBulb(music=False)
+    connects = []
     worker = BulbWorker(BulbConfig(name="bar", id="s", ip="1", local_key="k", min_interval=0.02),
-                        device_factory=lambda _cfg: bulb)
+                        device_factory=lambda _cfg: connects.append(1) or bulb)
     scene = bulbs.NativeScene.from_state({"21": "scene", "25": "abcdef"})
     worker.start()
     try:
@@ -139,4 +140,5 @@ def test_renewing_keeps_the_lights_own_effect_playing(monkeypatch) -> None:
     finally:
         worker.stop(2)
     scenes = [v for k, v in bulb.sent if k == "multi" and v.get("21") == "scene"]
+    assert len(connects) >= 2  # it did renew
     assert len(scenes) == 1

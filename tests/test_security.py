@@ -88,7 +88,9 @@ def test_known_keys_are_masked_in_any_form() -> None:
 def test_tuya_sharing_console_handler_is_filtered(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setenv("APPDATA", str(tmp_path))
     root = logging.getLogger()
-    saved = root.handlers[:]
+    saved, level = root.handlers[:], root.level
+    sharing = logging.getLogger("tuya_sharing")
+    sharing_filters = sharing.filters[:]
     try:
         root.handlers = []
         main.setup_logging(False)
@@ -99,6 +101,10 @@ def test_tuya_sharing_console_handler_is_filtered(monkeypatch, tmp_path, capsys)
         for h in root.handlers:
             h.close()
         root.handlers = saved
+        root.setLevel(level)
+        sharing.filters = sharing_filters
+        for name in ("tuya_sharing", "urllib3", "tinytuya"):
+            logging.getLogger(name).setLevel(logging.NOTSET)
     assert "RTSECRET99" not in capsys.readouterr().err
     assert "RTSECRET99" not in (tmp_path / "TuyaChroma" / "log.txt").read_text(encoding="utf-8")
 

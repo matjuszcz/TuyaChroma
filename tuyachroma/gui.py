@@ -265,7 +265,8 @@ class App:
         self._build_settings_tab()
 
         bottom = ttk.Frame(self.root, padding=(self.px(18), 0, self.px(18), self.px(10)))
-        bottom.pack(fill="x")
+        # packed before the tabs: on a short window the messages stay visible
+        bottom.pack(side="bottom", fill="x", before=self.notebook)
         self.busy_var = tk.StringVar()
         ttk.Label(bottom, textvariable=self.busy_var, style="Muted.TLabel").pack(side="left")
         ttk.Label(bottom, text=f"v{__version__}", style="Muted.TLabel").pack(side="right")
@@ -293,9 +294,14 @@ class App:
     def _paint_strip(self) -> None:
         """One glowing pill per light in the color it shows; grey with its name otherwise."""
         canvas = self.strip
-        canvas.delete("all")
         lights = self.config.enabled_devices
         width, height = canvas.winfo_width(), int(canvas.cget("height"))
+        colors = self.service.bulb_colors() if lights else {}
+        key = (width, height, tuple((d.id, d.name, colors.get(d.id)) for d in lights))
+        if key == getattr(self, "_strip_key", None):
+            return  # nothing changed (e.g. a static profile): no redraw
+        self._strip_key = key
+        canvas.delete("all")
         if width < 40:
             return  # not laid out yet
         glow = self.px(8)  # room for the light's glow around its pill
@@ -306,7 +312,6 @@ class App:
                                text="Światła sterowane przez Razer pojawią się tutaj – zaznacz je "
                                     "w zakładce Światła.")
             return
-        colors = self.service.bulb_colors()
         gap = self.px(10)
         field = (width - 2 * glow - gap * (len(lights) - 1)) / len(lights)
         y0, y1 = glow, height - glow
@@ -317,17 +322,17 @@ class App:
             rgb = colors.get(dev.id)
             label = {"text": dev.name, "font": self.fonts["pill"], "width": max(10, field - radius)}
             if rgb == "scene":  # the light plays its own effect: a band of hues
-                hues = [tuple(round(c * 255) for c in colorsys.hsv_to_rgb(k / 6, 0.6, 1.0))
-                        for k in range(7)]
-                self._glow(x0, y0, x1, y1, radius, hues[0])
-                theme.rounded_rect(canvas, x0, y0, x1, y1, radius, fill=theme.hex_color(hues[0]),
+                first = tuple(round(c * 255) for c in colorsys.hsv_to_rgb(0, 0.6, 1.0))
+                self._glow(x0, y0, x1, y1, radius, (200, 200, 210))  # a neutral halo
+                theme.rounded_rect(canvas, x0, y0, x1, y1, radius, fill=theme.hex_color(first),
                                    outline="", tags="pill")
-                steps = max(1, int((field - radius) // self.px(3)))
-                for k in range(steps):
+                steps = 24  # enough for a smooth band, cheap to draw
+                band = max(0.0, field - 2 * radius)  # between the round ends (red, like hue 0)
+                for k in range(steps if band else 0):
                     hue = colorsys.hsv_to_rgb(k / steps, 0.6, 1.0)
                     canvas.create_rectangle(
-                        x0 + radius / 2 + k * (field - radius) / steps, y0,
-                        x0 + radius / 2 + (k + 1) * (field - radius) / steps + 1, y1, width=0,
+                        x0 + radius + k * band / steps, y0,
+                        x0 + radius + (k + 1) * band / steps + 1, y1, width=0,
                         fill=theme.hex_color(tuple(round(c * 255) for c in hue)))
                 canvas.create_text((x0 + x1) / 2, height / 2, fill="#15181E", **label)
             elif rgb:
@@ -1612,7 +1617,7 @@ class App:
         from PIL import ImageTk  # noqa: PLC0415
 
         self._account, data = result
-        img = qrcode.make(data, box_size=6, border=2).get_image()
+        img = qrcode.make(data, box_size=6, border=4).get_image()  # white margin: scans on dark
         self._qr_image = ImageTk.PhotoImage(img)
         self.qr_label.configure(image=self._qr_image)
         self.login_var.set("Zeskanuj kod aplikacją Smart Life i potwierdź logowanie…")
