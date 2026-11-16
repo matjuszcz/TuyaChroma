@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict
 import colorsys
+import ipaddress
 import logging
 import os
 import queue
@@ -93,6 +94,14 @@ def _status_tag(status: str) -> str:
     if status in (STATUS_SYNC, STATUS_SCENE):
         return "ok"
     return "idle"
+
+
+def _lan_address(text: str) -> bool:
+    """A light's IP: an address in the home network."""
+    try:
+        return ipaddress.ip_address(text).is_private
+    except ValueError:
+        return False
 
 
 def new_tk_root(attempts: int = 3) -> tk.Tk:
@@ -1008,7 +1017,11 @@ class App:
         if "zone" in changed:
             dev.zone = _label_to_key(ZONE_LABELS, shown["zone"])
         if "ip" in changed:
-            dev.ip = (shown["ip"] or "").strip()
+            ip = (shown["ip"] or "").strip()
+            if not ip or _lan_address(ip):
+                dev.ip = ip
+            elif not quiet:  # (while typing, a half-typed address just waits)
+                self.set_busy(f"„{ip}” to nie jest adres w sieci domowej (np. 192.168.0.60).")
         if "version" in changed:
             version = (shown["version"] or "").strip().replace(",", ".")
             dev.version = version if version in ("3.1", "3.2", "3.3", "3.4", "3.5") else ""
@@ -1113,10 +1126,27 @@ class App:
 
     def _scan_and_probe(self) -> tuple[int, int]:
         found = scan(10)
-        matched = self.config.apply_scan(found)
+        matched = 0
         for dev in self.config.devices:
-            if dev.ip and not dev.version:
-                dev.version = probe_version(dev.id, dev.ip, dev.local_key) or ""
+            info = found.get(dev.id)
+            if info is None:
+                if dev.ip and not dev.version:
+                    dev.version = probe_version(dev.id, dev.ip, dev.local_key) or ""
+                continue
+            matched += 1
+            if info["ip"] == dev.ip and dev.version:
+                continue
+            # Anyone on the LAN can announce a light: an address counts once the
+            # light answers there with its own key (which also gives the version).
+            version = probe_version(dev.id, info["ip"], dev.local_key,
+                                    dev.version or info.get("version", ""))
+            if version:
+                dev.ip, dev.version = info["ip"], version
+            elif not dev.ip:
+                dev.ip = info["ip"]  # first time: the connection finds the version
+            else:
+                _LOGGER.warning("%s: announced at %s, but nothing there answers with its key - "
+                                "ignored", dev.name, info["ip"])
         return matched, len(self.config.devices)
 
     def _scan_done(self, result: tuple[int, int]) -> None:
@@ -1397,7 +1427,7 @@ class App:
         try:
             db = devices_db.load()
             text = f"Baza urządzeń Razer: wersja {db['version']} ({db.get('updated', '?')})"
-        except devices_db.DatabaseError as err:
+        except Exception as err:  # noqa: BLE001 - shown, never fatal
             text = f"Baza urządzeń Razer: {err}"
         self.db_info.set(text + (f" – {extra}" if extra else ""))
 

@@ -57,10 +57,13 @@ RETRY_FIRST = 5.0
 # so the fade ends together with the Razer devices).
 COLOUR_FADE_MS = 250.0  # colour mode: the light's own fade
 MUSIC_FADE_MS = 100.0   # music data with transition "gradient": a short, quick fade
-# Colour mode: every color waits for the light's answer (it answers a changed
-# value). 1.9.18 sent most without reading the answers; they piled up unread on
-# the connection, which may hang a light (RGB Biuro 2: error 914 since). 0 = all.
-CONFIRM_EVERY = 0.0
+# Colour mode: one color in this time waits for the light's answer (to measure
+# its delay and notice a lost light); the others are sent without waiting, so a
+# light gets colors at its full rate ("Szybkość zmian") - waiting for every
+# answer made a 0.1 s rate ~0.2-0.4 s on the GU10s: visible steps in effects.
+# The answers are still all read: before every color (_drain), so they can't
+# pile up unread (1.9.18 didn't read them: a likely cause of error 914).
+CONFIRM_EVERY = 1.0
 # How long to wait for an answer once connected: a light that skips one blocks
 # for this long, not for the 3 s connect timeout.
 # GU10s answer in 60-110 ms but skip an answer now and then; this long the light
@@ -582,6 +585,7 @@ class BulbWorker(threading.Thread):
         self._resend_full = full
         hexval = tinytuya.BulbDevice.rgb_to_hexvalue(r, g, b, dps["value_hexformat"])
         value_key = (self.use_music, self.transition, hexval)
+        self._drain()  # answers to earlier colors: read them, never let them pile up
         if not full and value_key == self._last_value:
             # Exactly what the light already shows (a refresh, or two colors that
             # round to the same value). Tuya lights only answer when a value

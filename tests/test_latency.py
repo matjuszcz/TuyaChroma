@@ -250,6 +250,7 @@ def test_music_mode_sends_without_waiting() -> None:
 
 
 def test_missing_confirmation_is_not_counted_as_delay(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(bulbs, "CONFIRM_EVERY", 0.0)  # every color confirmed
     monkeypatch.setattr(bulbs, "NO_ACK_MS", 50.0)
 
     class Silent(FakeBulb):
@@ -387,10 +388,11 @@ def test_unchanged_value_does_not_block_the_light(monkeypatch) -> None:
         worker.stop(2)
 
 
-def test_colour_mode_reads_every_answer_with_a_short_timeout() -> None:
-    """Unread answers piled up on the connection in 1.9.18 (RGB Biuro 2 then rejected
-    every connection, error 914). Every colour-mode color now reads its answer, and a
-    missing answer blocks for REPLY_TIMEOUT (0.7 s), not the 3 s connect timeout."""
+def test_colour_mode_confirms_now_and_then_with_a_short_timeout(monkeypatch) -> None:
+    """Most colors go out without waiting (the light gets them at its full rate);
+    one per CONFIRM_EVERY waits for the answer, which times out after REPLY_TIMEOUT,
+    not the 3 s connect timeout. (That all answers are still read: test_tinytuya_wire.)"""
+    monkeypatch.setattr(bulbs, "CONFIRM_EVERY", 0.3)
     timeouts, waited = [], []
 
     class GU10(FakeBulb):
@@ -409,11 +411,11 @@ def test_colour_mode_reads_every_answer_with_a_short_timeout() -> None:
     try:
         assert wait_for(lambda: worker.connected)
         assert timeouts == [bulbs.REPLY_TIMEOUT]
-        for i in range(8):
-            worker.set_color((20 * i, 100, 200 - 10 * i))
+        for i in range(30):
+            worker.set_color((8 * i, 100, 250 - 8 * i))
             time.sleep(0.04)
-        assert wait_for(lambda: len(waited) >= 5)
-        assert all(waited)  # every answer is read
+        assert wait_for(lambda: len(waited) >= 20)
+        assert any(waited) and not all(waited)  # confirmed now and then, not every color
     finally:
         worker.stop(2)
 
@@ -427,8 +429,9 @@ def test_battletron_never_gets_colors_faster_than_it_takes() -> None:
     assert other.bulb_config().min_interval == 0.15
 
 
-def test_reply_timeout_is_not_taken_for_delay() -> None:
+def test_reply_timeout_is_not_taken_for_delay(monkeypatch) -> None:
     """A missing answer returns after REPLY_TIMEOUT; that must not become the light's delay."""
+    monkeypatch.setattr(bulbs, "CONFIRM_EVERY", 0.0)  # every color confirmed
     assert bulbs.NO_ACK_MS < bulbs.REPLY_TIMEOUT * 1000
 
     class Silent(FakeBulb):

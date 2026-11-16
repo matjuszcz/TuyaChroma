@@ -202,6 +202,14 @@ def load(path: Path | None = None) -> AppConfig:
                 device.source = "keyboard"
             if device.method not in METHODS:
                 device.method = "auto"
+            if not (device.zone in ZONES or (isinstance(device.zone, int)
+                                             and not isinstance(device.zone, bool))
+                    or (isinstance(device.zone, list) and device.zone
+                        and all(isinstance(k, int) and not isinstance(k, bool)
+                                for k in device.zone))):
+                device.zone = "all"  # a bad zone stopped the sync of every light
+            device.brightness = max(0.0, min(1.0, device.brightness))
+            device.min_brightness = max(0.0, min(1.0, device.min_brightness))
             devices.append(device)
             redact.remember(raw["local_key"])
         except (OSError, TypeError, ValueError) as err:
@@ -215,13 +223,14 @@ def load(path: Path | None = None) -> AppConfig:
         settings.profiles = [Profile.from_dict(p) for p in raw_profiles if isinstance(p, dict)]
     elif isinstance(legacy_fx, dict):
         # 1.1 -> profiles: keep the user's effect as the active profile
-        period = float(legacy_fx.get("period", 8.0) or 8.0)
+        legacy = typed_fields(_Legacy, legacy_fx)  # (odd values keep their defaults)
+        effect = legacy["effect"] if isinstance(legacy.get("effect"), str) else "wave"
         mine = Profile(
             name="Mój efekt",
-            effect=LEGACY_EFFECTS.get(legacy_fx.get("effect", "wave"), "wave"),
-            color1=legacy_fx.get("color", "#44d62c"),
-            speed=round(16 / max(1.6, period)),
-            brightness=legacy_fx.get("brightness", 1.0),
+            effect=LEGACY_EFFECTS.get(effect, "wave"),
+            color1=legacy.get("color", "#44d62c"),
+            speed=round(16 / max(1.6, min(60.0, legacy.get("period") or 8.0))),
+            brightness=legacy.get("brightness", 1.0),
         )
         mine.sanitize()
         settings.profiles = [mine] + default_profiles()
@@ -266,6 +275,16 @@ def load(path: Path | None = None) -> AppConfig:
         username=str(data.get("username") or ""), user_code=str(data.get("user_code") or ""),
         tuya_session=session, read_errors=read_errors,
     )
+
+
+@dataclass
+class _Legacy:
+    """The single effect saved by 1.1 (only its types matter here)."""
+
+    effect: str = "wave"
+    color: str = "#44d62c"
+    period: float = 8.0
+    brightness: float = 1.0
 
 
 def _keep_aside(path: Path) -> None:

@@ -231,9 +231,10 @@ def main(argv: list[str] | None = None) -> int:
     from .gui import App  # noqa: PLC0415
 
     start_hidden = args.minimized and config.settings.start_minimized and bool(config.devices)
-    app = App(config, service, start_hidden=start_hidden)
-    app_holder.append(app)
     try:
+        # (inside: if the window can't be built, the lights are still given back)
+        app = App(config, service, start_hidden=start_hidden)
+        app_holder.append(app)
         app.mainloop()
     finally:
         service.stop()

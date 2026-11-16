@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 import logging
 import math
+import re
 from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
+_HEX = re.compile(r"#[0-9a-fA-F]{6}")
 
 EFFECTS = [
     "wave", "spectrum", "breathing", "static", "wheel",
@@ -47,6 +49,9 @@ class Profile:
             self.color_mode = "single"
         if self.direction not in DIRECTIONS:
             self.direction = "right"
+        for name, default in (("color1", "#44d62c"), ("color2", "#0080ff")):
+            if not _HEX.fullmatch(str(getattr(self, name))):
+                setattr(self, name, default)
         self.speed = max(1, min(10, int(self.speed)))
         self.density = max(1, min(10, int(self.density)))
         self.brightness = max(0.05, min(1.0, float(self.brightness)))

@@ -163,9 +163,19 @@ def keep_session_alive(session: dict[str, Any],
     api.refresh_token = True  # the SDK's own guard: don't let get() refresh by itself
     try:
         response = api.get("/v1.0/m/token/" + token.refresh_token)
-    except Exception as err:  # noqa: BLE001 - network trouble
-        # (the error text holds the request URL, which holds the refresh token)
+    except Exception as err:  # noqa: BLE001
+        # The SDK raises for a refusal ("network error:(1010) token is expired")
+        # as well as for network trouble. (Its text may hold the request URL,
+        # which holds the refresh token: only the marker is logged.)
+        text = str(err)
+        refused = next((m for m in EXPIRED_MARKERS if m in text), None)
+        if refused:
+            _LOGGER.warning("Tuya login renewal refused: %s", refused)
+            return False
         _LOGGER.info("Tuya login renewal: no answer (%s), will retry", type(err).__name__)
+        return None
+    if response is None:  # an HTTP error (e.g. 503): Tuya didn't answer, try again later
+        _LOGGER.info("Tuya login renewal: no answer (HTTP error), will retry")
         return None
     if not isinstance(response, dict) or not response.get("success"):
         if isinstance(response, dict):

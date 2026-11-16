@@ -187,6 +187,7 @@ class Renderer:
             del stars[i]
         expected = p.density * 0.06 * n * dt / max(0.2, life / 2)
         spawn = int(expected) + (1 if self._rng.random() < expected % 1 else 0)
+        spawn = min(spawn, n)  # after a long pause (a game) don't spawn hours of stars at once
         x0, aw, y0, ah = self._area(target, w, h)
         for _ in range(spawn):  # only where there are LEDs (e.g. the keys of a 60% keyboard)
             i = (int(y0) + self._rng.randrange(int(ah))) * w + int(x0) + self._rng.randrange(int(aw))

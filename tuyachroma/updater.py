@@ -81,6 +81,13 @@ def check_latest(get=_get) -> Release | None:
         raise
     except ValueError as err:
         raise UpdateError(f"nieprawidłowa odpowiedź GitHub: {err}") from err
+    try:
+        return _release_from(data, get)
+    except (KeyError, TypeError, ValueError, AttributeError) as err:
+        raise UpdateError(f"nieprawidłowa odpowiedź GitHub: {err!r}") from err
+
+
+def _release_from(data, get) -> Release | None:
     assets = {a.get("name"): a for a in data.get("assets", [])}
     asset = assets.get(ASSET_NAME)
     if asset is None:

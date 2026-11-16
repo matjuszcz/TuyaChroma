@@ -83,7 +83,7 @@ def test_damaged_settings_values_fall_back_to_defaults(tmp_path) -> None:
     assert s.latency_ms == 300 and s.bulb_effect_rate == 1.0 and s.fps == 20 and s.idle == "effect"
     assert s.profile.name == "Mój" and 1 <= s.profile.speed <= 10
     dev = cfg.devices[0]
-    assert dev.min_interval == 0.15 and dev.enabled is False and dev.zone == ["custom"]
+    assert dev.min_interval == 0.15 and dev.enabled is False and dev.zone == "all"  # (unusable zone)
 
 
 def test_non_finite_numbers_keep_defaults(tmp_path) -> None:
@@ -243,3 +243,29 @@ def test_unknown_source_or_method_falls_back(tmp_path) -> None:
                                           "source": "Keyboard", "method": "turbo"}]})
     dev = config_mod.load(path).devices[0]
     assert dev.source == "keyboard" and dev.method == "auto"
+
+
+def test_hand_edited_light_values_are_made_safe(tmp_path) -> None:
+    path = _write(tmp_path, {"devices": [
+        {"id": "a", "name": "A", "local_key": "", "zone": {"x": 1}, "brightness": -1,
+         "min_brightness": 2},
+        {"id": "b", "name": "B", "local_key": "", "zone": [3, 4]}]})
+    a, b = config_mod.load(path).devices
+    assert a.zone == "all" and a.brightness == 0.0 and a.min_brightness == 1.0
+    assert b.zone == [3, 4]  # custom keys stay
+
+
+def test_odd_1_1_settings_migrate_without_crashing(tmp_path) -> None:
+    for fx in ({"period": "slow"}, {"brightness": "full"}, {"effect": ["wave"]},
+               {"color": 16711680}):
+        cfg = config_mod.load(_write(tmp_path, {"settings": {"effect": fx}}))
+        mine = cfg.settings.profile
+        assert mine.name == "Mój efekt" and mine.color1.startswith("#")
+
+
+def test_starlight_after_a_long_pause_is_quick() -> None:
+    rend = Renderer(Profile(effect="starlight", density=10))
+    rend.strip(5, 1.0)
+    started = time.perf_counter()
+    rend.strip(5, 1.0 + 4 * 3600)  # four hours later (a long game)
+    assert time.perf_counter() - started < 0.05

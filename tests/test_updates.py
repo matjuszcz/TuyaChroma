@@ -247,3 +247,17 @@ def test_updated_by_old_version_restarts_independently(monkeypatch, tmp_path) ->
     monkeypatch.setattr(main.updater, "start_detached", lambda exe, *a: started.append(a))
     assert main.main(["--updated", "--minimized"]) == 0
     assert started == [("--updated", "--relaunched", "--minimized")]
+
+
+def test_malformed_release_data_is_an_update_error() -> None:
+    import json
+
+    import pytest
+
+    from tuyachroma import updater
+
+    for body in ([], {"assets": None}, {"assets": [{"name": updater.ASSET_NAME}]},
+                 {"assets": [{"name": updater.ASSET_NAME, "browser_download_url": "x",
+                              "size": "big"}]}):
+        with pytest.raises(updater.UpdateError):
+            updater.check_latest(lambda url, accept=None, b=body: json.dumps(b).encode())

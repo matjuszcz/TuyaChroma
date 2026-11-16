@@ -157,3 +157,24 @@ def test_malformed_broadcast_is_ignored(monkeypatch) -> None:
     for payload in ({"gwId": ["x"], "ip": "10.0.0.2"}, {"gwId": "b", "ip": "not an ip"},
                     {"gwId": "b", "ip": 5}):
         assert scan.parse_broadcast(json.dumps(payload).encode()) is None
+
+
+def test_damaged_database_cache_never_stops_the_program(tmp_path, monkeypatch) -> None:
+    import json
+
+    import pytest
+
+    from tuyachroma import devices_db
+
+    with pytest.raises(devices_db.DatabaseError):
+        devices_db.validate({"version": 3, "rules": [{"category": "keyboard", "keywords": ["x"]}],
+                             "notes": None})
+    bad = tmp_path / "razer_devices.json"
+    bad.write_text(json.dumps({"version": 99, "rules": [{"category": "keyboard",
+                                                          "keywords": ["x"]}], "notes": 5}))
+    monkeypatch.setattr(devices_db, "cache_path", lambda: bad)
+    devices_db.reset()
+    try:
+        assert devices_db.load()["version"] < 99  # the bundled database instead
+    finally:
+        devices_db.reset()

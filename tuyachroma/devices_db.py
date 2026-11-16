@@ -59,6 +59,8 @@ def validate(db: Any) -> dict[str, Any]:
             k in ("mini", "tkl") and isinstance(v, list)
             and all(isinstance(w, str) and w for w in v) for k, v in layouts.items()):
         raise DatabaseError("błędne układy klawiatur")
+    if not isinstance(db.get("notes", []), list):
+        raise DatabaseError("błędne uwagi")
     for note in db.get("notes", []):
         if not isinstance(note, dict) or not isinstance(note.get("match"), str) \
                 or not note["match"] or not isinstance(note.get("note"), str):
@@ -75,7 +77,7 @@ def _read(path: Path) -> dict[str, Any] | None:
         return validate(json.loads(path.read_text(encoding="utf-8")))
     except FileNotFoundError:
         return None
-    except (OSError, ValueError, DatabaseError) as err:
+    except Exception as err:  # noqa: BLE001 - a damaged cache must never stop the program
         _LOGGER.warning("Ignoring device database %s: %s", path, err)
         return None
 
@@ -109,7 +111,7 @@ def fetch_remote(url: str = DB_URL, timeout: float = 10) -> dict[str, Any]:
         raise DatabaseError(f"nie udało się pobrać bazy: {err}") from err
     try:
         return validate(json.loads(raw.decode("utf-8")))
-    except ValueError as err:
+    except (ValueError, TypeError, AttributeError, KeyError) as err:
         raise DatabaseError(f"pobrana baza jest uszkodzona: {err}") from err
 
 

@@ -285,6 +285,7 @@ def test_gui_login_and_select(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(cloud, "TuyaAccount", FakeAccount)
     monkeypatch.setattr(gui, "scan", lambda _s: {"bf1": {"id": "bf1", "ip": "10.0.0.5", "version": "3.3"}})
+    monkeypatch.setattr(gui, "probe_version", lambda i, ip, k, preferred="": "3.3")
     service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
     app = gui.App(AppConfig(), service, start_hidden=False, use_tray=False)
     try:
@@ -612,6 +613,7 @@ def test_gui_razer_devices_and_account_refresh(tmp_path, monkeypatch) -> None:
     calls = []
     monkeypatch.setattr(razer_devices, "detect", lambda: calls.append(1) or list(detected))
     monkeypatch.setattr(gui, "scan", lambda _s: {"n1": {"id": "n1", "ip": "10.0.0.7", "version": "3.5"}})
+    monkeypatch.setattr(gui, "probe_version", lambda i, ip, k, preferred="": "3.5")
     monkeypatch.setattr(cloud, "fetch_with_session", lambda s, on_token=None: (
         [CloudDevice("n1", "New strip", "k" * 16, "dd", "", rgb=True)], {**s, "refreshed": True}))
     service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
@@ -1099,6 +1101,15 @@ def test_login_is_kept_alive(monkeypatch) -> None:
 
     monkeypatch.setattr(customerapi.CustomerApi, "get", offline)
     assert cloud.keep_session_alive(session, saved.append) is None  # unknown, not "expired"
+
+    # what the real SDK does: it raises for a refusal, and returns None for an HTTP error
+    def refused(self, path, params=None):
+        raise Exception("network error:(1010) token is expired")  # noqa: TRY002
+
+    monkeypatch.setattr(customerapi.CustomerApi, "get", refused)
+    assert cloud.keep_session_alive(session, saved.append) is False
+    monkeypatch.setattr(customerapi.CustomerApi, "get", lambda self, path, params=None: None)
+    assert cloud.keep_session_alive(session, saved.append) is None  # 503: try again later
 
 
 @pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")

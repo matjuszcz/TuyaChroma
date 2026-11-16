@@ -129,3 +129,41 @@ def test_color_after_a_heartbeat_is_not_held_back(monkeypatch) -> None:
     sends = [t for t, c, d in fake.log if c == 7 and d and "24" in d]
     gaps = [b - a for a, b in zip(sends[5:], sends[6:])]
     assert gaps and max(gaps) < 0.33, max(gaps)  # (min interval 0.15 s + a little)
+
+
+def test_answers_to_unconfirmed_colors_never_pile_up() -> None:
+    """Colors go out without waiting; their answers must still all be read (unread
+    answers piling up on the connection likely hung RGB Biuro 2, error 914)."""
+    import socket as _socket
+
+    fake = FakeBulb(delay=0.01)
+    w = _worker(fake)
+    backlog = []
+    real_send = bulbs.BulbWorker._send
+
+    def spy(self, rgb):
+        sock = self._dev.socket
+        if sock is not None:
+            sock.setblocking(False)
+            try:
+                backlog.append(len(sock.recv(65536, _socket.MSG_PEEK)))
+            except (BlockingIOError, OSError):
+                backlog.append(0)
+            finally:
+                sock.settimeout(bulbs.REPLY_TIMEOUT)
+        real_send(self, rgb)
+
+    bulbs.BulbWorker._send = spy
+    try:
+        w.start()
+        t0 = time.monotonic()
+        w.set_color_source(lambda: (int((time.monotonic() - t0) * 300) % 256, 40, 0), key=1)
+        time.sleep(2.5)
+    finally:
+        bulbs.BulbWorker._send = real_send
+        w.stop(5)
+    assert len(backlog) > 10
+    assert max(backlog[5:]) < 400  # at most the last color's answer, never a pile
+    sends = [t for t, c, d in fake.log if c == 7 and d and "24" in d]
+    gaps = [b - a for a, b in zip(sends[3:], sends[4:])]
+    assert sum(gaps) / len(gaps) < 0.2  # at its rate (0.15 s), not rate + reply time

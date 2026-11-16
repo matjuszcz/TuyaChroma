@@ -29,7 +29,7 @@ while it runs.
 
 ## Commands
 - Tests (Linux needs xvfb for Tk): `xvfb-run -a python -m pytest -q`. Baseline:
-  304 passed, 11 skipped. Run it twice after changes (timing tests).
+  319 passed, 11 skipped. Run it twice after changes (timing tests).
 - Lint: `python -m pyflakes tuyachroma tests`
 - GUI screenshot: build a Tk app with test data under xvfb (see tests/test_app.py
   for how to construct `App`).
@@ -68,9 +68,15 @@ Other rules:
     Music/DP 28 is never acked, so it is sent nowait.
   - REPLY_TIMEOUT 0.35; COLOUR_FADE_MS 250; heartbeat 8 s (nowait in colour mode,
     waited only in music mode, where it is the only check for a hung light).
-  - tinytuya returns the FIRST waiting message as a waited call's reply: `_drain()`
-    reads queued acks/status pushes before every waited command, and `_set_values()`
-    resets tinytuya's sticky single-DP fallback (`max_simultaneous_dps`).
+  - Colour mode: colors are sent without waiting; one per CONFIRM_EVERY (1 s) waits
+    for the answer (waiting for every one cut a 0.1 s rate to ~0.25-0.4 s: visible
+    steps on the GU10s, owner's video). All answers are still read: `_drain()` runs
+    before every color and after heartbeats (unread answers piling up likely hung
+    RGB Biuro 2 with 914 in 1.9.18). `_drain()` turns off tinytuya's retry so an
+    empty ack doesn't wait the whole reply timeout.
+  - tinytuya returns the FIRST waiting message as a waited call's reply (hence
+    `_drain()`), and `_set_values()` resets tinytuya's sticky single-DP fallback
+    (`max_simultaneous_dps`).
   - Takeover sets `_in_sync_mode` right after remembering the original state, so a
     lost answer still gets the light given back; `_resend_full` stays set until a
     full (switch + mode) send is confirmed.
