@@ -1159,6 +1159,22 @@ def test_live_strip_shows_each_lights_color(tmp_path, monkeypatch) -> None:
         assert fills == ["#8c3cff", theme.SURFACE]  # only lights Razer controls; one off
         texts = [app.strip.itemcget(i, "text") for i in app.strip.find_all() if app.strip.type(i) == "text"]
         assert texts == ["RGB Biuro 1", "Light Bar"]
+        monkeypatch.setattr(service, "bulb_colors", lambda: {"a": "scene", "b": None})
+        app._paint_strip()  # its own effect: a band of hues, not "off"
+        fills = {app.strip.itemcget(i, "fill") for i in app.strip.find_all()
+                 if app.strip.type(i) == "rectangle"}
+        assert len(fills) > 5
+        painted = []
+        monkeypatch.setattr(app, "_paint_strip", lambda: painted.append(1))
+        app.root.withdraw()  # in the tray: no repainting
+        app._strip_loop()
+        assert painted == []
+        app.root.deiconify()
+        app.root.update()
+        app._strip_loop()
+        assert painted == [1]
+        monkeypatch.undo()
+        monkeypatch.setenv("APPDATA", str(tmp_path))
         for d in config.devices:
             d.enabled = False
         app._paint_strip()  # nothing selected: a hint instead
@@ -1176,3 +1192,27 @@ def test_only_problems_are_colored_in_the_table() -> None:
     assert gui._status_tag("sterowana z HA") == "idle"
     assert gui.theme.readable_on((255, 255, 0)) == gui.theme.INK      # dark text on yellow
     assert gui.theme.readable_on((40, 0, 120)) == gui.theme.SURFACE   # light text on deep blue
+
+
+@pytest.mark.skipif(not _tk_available(), reason="no display / tkinter")
+def test_all_nine_lights_reachable_in_the_table(tmp_path, monkeypatch) -> None:
+    """The user's account has 9 lights: the table needs a scrollbar for those below."""
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tkinter import ttk
+
+    from tuyachroma import gui
+
+    config = AppConfig(devices=[dev(f"d{i}", name=f"Light {i}") for i in range(9)])
+    service = SyncService(reader_factory=FakeReader, worker_factory=Recorder, service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    try:
+        app.root.geometry("900x600")
+        for _ in range(10):
+            app.root.update()
+        bars = [w for w in app.tree.master.winfo_children() if isinstance(w, ttk.Scrollbar)]
+        assert bars and bars[0].get() != (0.0, 1.0)  # rows below the view, and a way to them
+        app.tree.see("d8")
+        app.root.update()
+        assert app.tree.bbox("d8")  # the last light can be shown
+    finally:
+        app.root.destroy()

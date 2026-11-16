@@ -379,6 +379,7 @@ class SyncService:
                 w.start()
             self.player = None
             self._profile = s.profile
+            self._settings = s
             if s.idle in ("full", "effect"):
                 profile = s.profile
                 screen = self._screen_factory() if profile.effect == "ambient" else None
@@ -560,10 +561,34 @@ class SyncService:
         if config.settings.sync_enabled:
             self.start(config)
 
-    def bulb_colors(self) -> dict[str, RGB | None]:
-        """The color each light was last sent (None: not showing ours right now)."""
-        return {w.cfg.id: (getattr(w, "_sent", None) if getattr(w, "_in_sync_mode", False) else None)
-                for w in self.workers}
+    # Effects whose color at a moment depends only on the time (rendering them for
+    # the window doesn't disturb the lights' own rendering state)
+    STATELESS_EFFECTS = {"static", "spectrum", "breathing", "wave", "wheel", "ambient"}
+
+    def bulb_colors(self) -> dict[str, RGB | str | None]:
+        """What each light shows now, for the window: a color, "scene" (its own
+        effect) or None (not showing ours). Lights are sent effect colors ahead of
+        time; the window shows the color of this moment, like the Razer devices."""
+        player, profile, settings = self.player, self._profile, getattr(self, "_settings", None)
+        workers = list(self.workers)
+        now = time.monotonic()
+        live = (player is not None and profile is not None and settings is not None
+                and not self.game_active and profile.effect in self.STATELESS_EFFECTS)
+        out: dict[str, RGB | str | None] = {}
+        for index, w in enumerate(workers):
+            if not getattr(w, "_in_sync_mode", False):
+                out[w.cfg.id] = None
+            elif getattr(w, "_scene_sent", None) is not None:
+                out[w.cfg.id] = "scene"
+            elif live and callable(getattr(w, "_target", None)):
+                try:
+                    out[w.cfg.id] = self._bulb_effect_color(w, index, len(workers), settings, profile,
+                                                            at=now, ahead=False)
+                except Exception:  # noqa: BLE001 - e.g. stopping right now
+                    out[w.cfg.id] = getattr(w, "_sent", None)
+            else:
+                out[w.cfg.id] = getattr(w, "_sent", None)
+        return out
 
     def bulb_statuses(self) -> dict[str, str]:
         return {w.cfg.id: w.status for w in self.workers}
@@ -601,7 +626,7 @@ class SyncService:
         return max(-1000.0, min(3000.0, base + getattr(worker.cfg, "latency_adjust_ms", 0)))
 
     def _bulb_effect_color(self, worker, index: int, count: int, settings, profile,
-                           at: float | None = None) -> RGB:
+                           at: float | None = None, ahead: bool = True) -> RGB:
         """The profile's color for one bulb, rendered ahead by the bulb's delay.
 
         Effects are computed by the program, so the color the bulb will need a
@@ -616,7 +641,7 @@ class SyncService:
             # the middle of that time (ticks are already sampled in the middle).
             interval = getattr(worker, "_interval", None)
             base += interval() / 2 if callable(interval) else 0.0
-        t = base + self.latency_offset_ms(worker, settings) / 1000
+        t = base + (self.latency_offset_ms(worker, settings) / 1000 if ahead else 0.0)
         renderer = player.renderer
         if profile.effect == "ambient" and renderer.screen is not None:
             rgb = ambient_color(renderer.screen, cfg, index, count)
@@ -857,6 +882,17 @@ class SyncService:
         finally:
             if reader is not None:
                 reader.close()  # releases the mutexes from the owning thread
+
+    def status_level(self) -> str:
+        """"ok", "warn" or "error" for razer_status (the window's status dot)."""
+        status = self.razer_status
+        if getattr(self, "razer_kept_by_synapse", False) or status.startswith(
+                ("Razer niedostępny", "błąd", "utracono", "Chroma SDK niedostępne")):
+            return "error"
+        if self.game_active or status.startswith(
+                ("pełna synchronizacja", "brak gry", "gra działa", "połączono", "efekt z gry")):
+            return "ok"
+        return "warn"
 
     def _status_text(self, idle: str, profile_name: str) -> str:
         if self.game_active:

@@ -888,3 +888,54 @@ def test_razer_devices_are_reclaimed_after_a_game(monkeypatch, caplog) -> None:
         assert wait(lambda: dll.calls.count(("Init",)) >= n + 2)
     finally:
         service.stop()
+
+
+def test_window_shows_the_color_of_this_moment() -> None:
+    """Lights get effect colors ahead of time; the window must show what the Razer
+    devices show now (it ran ahead of the keyboard), and own effects as such."""
+    service = engine.SyncService(layout_detector=lambda: "full", own_pid=OWN)
+    renderer = Renderer(Profile(effect="spectrum", speed=10))
+    service.player = type("P", (), {"renderer": renderer})()
+    settings = AppConfig().settings
+    service._profile, service._settings = renderer.profile, settings
+
+    class Lamp(_Light):
+        def __init__(self, i, target):
+            super().__init__(i, source="keyboard")
+            self._in_sync_mode, self._target, self.latency_ms = True, target, 400
+            self._scene_sent, self._sent = None, (1, 2, 3)
+
+        def _interval(self):
+            return 0.5
+
+    following = Lamp(0, lambda: (0, 0, 0))
+    scene = Lamp(1, None)
+    scene._scene_sent = object()
+    off = Lamp(2, None)
+    off._in_sync_mode = False
+    service.workers = [following, scene, off]
+    real = time.monotonic
+    try:
+        time.monotonic = lambda: 700.0
+        colors = service.bulb_colors()
+    finally:
+        time.monotonic = real
+    now = Renderer(Profile(effect="spectrum", speed=10)).strip(1, 700.0)[0]
+    assert colors["l0"] == now          # not 0.4 s + fade + half the hold ahead
+    assert colors["l1"] == "scene" and colors["l2"] is None
+    service.game_active = True          # game colors are live anyway: what was sent
+    assert service.bulb_colors()["l0"] == (1, 2, 3)
+
+
+def test_status_level() -> None:
+    service = engine.SyncService(layout_detector=lambda: "full", own_pid=OWN)
+    for status, level in (("pełna synchronizacja – profil „Wave”", "ok"),
+                          ("gra działa (bf6.exe) – urządzenia Razer oddane grze", "ok"),
+                          ("Razer niedostępny: Synapse not running", "error"),
+                          ("błąd odczytu Razer (szczegóły w logu) – ponawiam…", "error"),
+                          ("zatrzymane", "warn")):
+        service.razer_status = status
+        assert service.status_level() == level, status
+    service.razer_status = "pełna synchronizacja – profil „Wave”"
+    service.razer_kept_by_synapse = True
+    assert service.status_level() == "error"

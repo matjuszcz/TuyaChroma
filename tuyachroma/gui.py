@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
+import colorsys
 import logging
 import os
 import queue
@@ -85,7 +86,7 @@ def _status_tag(status: str) -> str:
     """Row color in the lights table: green synced, amber off, red error, grey idle."""
     if status.startswith("błąd") or "nieobsług" in status:
         return "err"
-    if status in (STATUS_OFFLINE,) or status.startswith("brak IP") or "nie znaleziono" in status:
+    if status == STATUS_OFFLINE or status.startswith("brak IP") or "nie znaleziono" in status:
         return "warn"
     if status in (STATUS_SYNC, STATUS_SCENE):
         return "ok"
@@ -272,7 +273,8 @@ class App:
         if self._quitting:
             return
         try:
-            self._paint_strip()
+            if self.root.state() == "normal":  # not while in the tray (most of the time)
+                self._paint_strip()
         finally:
             self.root.after(250, self._strip_loop)
 
@@ -282,7 +284,9 @@ class App:
         canvas.delete("all")
         lights = self.config.enabled_devices
         width, height = canvas.winfo_width(), int(canvas.cget("height"))
-        if not lights or width < 20:
+        if width < 20:
+            return  # not laid out yet
+        if not lights:
             canvas.create_text(0, height // 2, anchor="w", fill=theme.MUTED, font=self.fonts["small"],
                                text="Światła sterowane przez Razer pojawią się tutaj – zaznacz je "
                                     "w zakładce Światła.")
@@ -293,6 +297,16 @@ class App:
         for i, dev in enumerate(lights):
             x0 = i * (field + gap)
             rgb = colors.get(dev.id)
+            if rgb == "scene":  # the light plays its own effect: a band of hues
+                steps = max(1, int(field // self.px(4)))
+                for k in range(steps):
+                    hue = colorsys.hsv_to_rgb(k / steps, 0.65, 1.0)
+                    canvas.create_rectangle(x0 + k * field / steps, 0, x0 + (k + 1) * field / steps,
+                                            height - 1, width=0,
+                                            fill=theme.hex_color(tuple(round(c * 255) for c in hue)))
+                canvas.create_text(x0 + field / 2, height / 2, text=dev.name, fill=theme.INK,
+                                   font=self.fonts["small"], width=max(10, field - self.px(8)))
+                continue
             fill = theme.hex_color(rgb) if rgb else theme.SURFACE
             ink = theme.readable_on(rgb) if rgb else theme.MUTED
             canvas.create_rectangle(x0, 0, x0 + field, height - 1, fill=fill,
@@ -313,7 +327,13 @@ class App:
         ttk.Button(bar, text="Dobierz ustawienia automatycznie", command=self.auto_tune).pack(side="left")
 
         cols = ("on", "name", "ip", "version", "source", "zone", "latency", "status")
-        self.tree = ttk.Treeview(tab, columns=cols, show="headings", height=5, selectmode="browse")
+        table = ttk.Frame(tab)
+        table.pack(fill="both", expand=True)
+        self.tree = ttk.Treeview(table, columns=cols, show="headings", height=5, selectmode="browse")
+        # A scrollbar: with more lights than rows, the rest must not look missing.
+        tree_bar = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=tree_bar.set)
+        tree_bar.pack(side="right", fill="y")
         # Only problems get a color: a calm table where an off or broken light stands out.
         for tag, color in (("ok", theme.INK), ("warn", theme.WARN), ("err", theme.ERROR), ("idle", theme.MUTED)):
             self.tree.tag_configure(tag, foreground=color)
@@ -362,7 +382,7 @@ class App:
         ttk.Spinbox(self.editor, from_=-1000, to=1000, increment=50, textvariable=self.ed_latency,
                     width=7).grid(row=3, column=2, sticky="w", pady=(8, 0))
         ttk.Label(self.editor, text="(+ gdy się spóźnia)",
-                  foreground="#666").grid(row=3, column=3, columnspan=2, sticky="w", padx=(10, 0), pady=(8, 0))
+                  foreground=theme.MUTED).grid(row=3, column=3, columnspan=2, sticky="w", padx=(10, 0), pady=(8, 0))
         ttk.Label(self.editor, text="Szybkość zmian:").grid(row=4, column=1, sticky="e", padx=(10, 4), pady=(8, 0))
         ttk.Combobox(self.editor, textvariable=self.ed_speed, state="readonly", width=34,
                      values=list(SPEED_LABELS.values())).grid(row=4, column=2, columnspan=3, sticky="w", pady=(8, 0))
@@ -383,7 +403,7 @@ class App:
                         text="Własna fala w Wave/Spectrum/Koło").pack(side="left")
         ttk.Button(btns, text="Zapamiętaj efekt z aplikacji…",
                    command=self.capture_scene).pack(side="left", padx=6)
-        ttk.Label(btns, textvariable=self.ed_scene_info, foreground="#666").pack(side="left")
+        ttk.Label(btns, textvariable=self.ed_scene_info, foreground=theme.MUTED).pack(side="left")
         self.editor.columnconfigure(5, weight=1)
 
     def _build_account_tab(self) -> None:
@@ -467,7 +487,7 @@ class App:
         ttk.Label(tab, text="Gdy Razer działa, ale żadna gra nie wysyła efektów Chroma:").pack(anchor="w")
         for mode in IDLE_MODES:
             ttk.Radiobutton(tab, text=IDLE_LABELS[mode], value=mode, variable=self.set_idle).pack(anchor="w", padx=12)
-        ttk.Label(tab, foreground="#666", wraplength=self.px(780), justify="left",
+        ttk.Label(tab, foreground=theme.MUTED, wraplength=self.px(780), justify="left",
                   text="Efekt wybierasz w zakładce „Profile efektów”.").pack(anchor="w", padx=12, pady=(2, 0))
         ttk.Label(tab, text="Synchronizacja kolorów żarówek w efektach:").pack(anchor="w", pady=(12, 0))
         ttk.Radiobutton(
@@ -479,7 +499,7 @@ class App:
         ttk.Radiobutton(row, value="ticks", variable=self.set_effect_sync,
                         text="Oszczędna – wszystkie żarówki razem, zmian na sekundę:").pack(side="left")
         ttk.Spinbox(row, from_=0.5, to=5, increment=0.5, textvariable=self.set_bulb_rate, width=5).pack(side="left", padx=6)
-        ttk.Label(row, text="(3–5 = płynniej)", foreground="#666").pack(side="left")
+        ttk.Label(row, text="(3–5 = płynniej)", foreground=theme.MUTED).pack(side="left")
         row = ttk.Frame(tab)
         row.pack(anchor="w", pady=(8, 0))
         ttk.Label(row, text="Układ klawiatury Razer:").pack(side="left")
@@ -490,7 +510,7 @@ class App:
         ttk.Label(row, text="Odczyty Razer i klatki efektów na sekundę:").pack(side="left")
         ttk.Spinbox(row, from_=5, to=60, textvariable=self.set_fps, width=5).pack(side="left", padx=6)
         ttk.Label(
-            tab, foreground="#666", wraplength=self.px(780), justify="left",
+            tab, foreground=theme.MUTED, wraplength=self.px(780), justify="left",
             text=("Kolory z gry zawsze mają pierwszeństwo. Efektów z profilu Synapse nie da się odczytać – "
                   "w trybie pełnej synchronizacji program sam odtwarza wybrany profil na wszystkich "
                   "urządzeniach Razer Chroma i żarówkach, a po zamknięciu programu urządzenia Razer "
@@ -512,7 +532,7 @@ class App:
                             width=6).pack(side="left")
                 ttk.Label(lrow, text="ms").pack(side="left", padx=(2, 14))
         ttk.Label(
-            lat, foreground="#666", wraplength=self.px(780), justify="left",
+            lat, foreground=theme.MUTED, wraplength=self.px(780), justify="left",
             text=("Efekty liczy program, więc wysyła żarówkom kolor z wyprzedzeniem równym ich opóźnieniu – "
                   "wtedy świecą równo z klawiaturą. Zmierzone opóźnienie każdej żarówki widać w kolumnie "
                   "„Opóźnienie” w zakładce Światła, a korektę dla jednej żarówki ustawisz w jej ustawieniach. "
@@ -765,7 +785,7 @@ class App:
                 if device == "keyboard" and not (kc0 <= x <= kc1 and kr0 <= y <= kr1):
                     fill = "#222222"  # no key there on this keyboard
                 else:
-                    fill = "#%02x%02x%02x" % rgb
+                    fill = theme.hex_color(rgb)
                 c.create_rectangle(x0 + x * cell, y0 + y * cell, x0 + (x + 1) * cell - 2,
                                    y0 + (y + 1) * cell - 2, fill=fill, width=0)
 
@@ -778,7 +798,7 @@ class App:
         bulbs = r.strip(max(1, len(self.config.enabled_devices) or 4), t)
         for i, rgb in enumerate(bulbs):
             x = self.px(8) + i * self.px(22)
-            c.create_oval(x, self.px(125), x + self.px(18), self.px(143), fill="#%02x%02x%02x" % rgb, width=0)
+            c.create_oval(x, self.px(125), x + self.px(18), self.px(143), fill=theme.hex_color(rgb), width=0)
 
     # ---------------------------------------------------------------- bulbs
 
@@ -1098,7 +1118,7 @@ class App:
             self.razer_tree.column(col, width=self.px(width), anchor="w")
         self.razer_tree.pack(fill="both", expand=True)
         ttk.Label(
-            tab, foreground="#666", wraplength=self.px(820), justify="left",
+            tab, foreground=theme.MUTED, wraplength=self.px(820), justify="left",
             text=("Lista odświeża się sama po podłączeniu lub odłączeniu urządzenia. Efekty trafiają do "
                   "wszystkich urządzeń obsługiwanych przez Synapse – także tych, których nie widać na "
                   "liście (np. urządzenia partnerów z Chroma Connect)."),
@@ -1658,15 +1678,8 @@ class App:
         elif not self.config.enabled_devices:
             text, color = "Wybierz światła w zakładce „Światła”", theme.WARN
         else:
-            status = self.service.razer_status
-            text = f"Razer: {status}"
-            if "błąd" in status or "niedostęp" in status or "zostały przy" in status:
-                color = theme.ERROR
-            elif self.service.game_active or "synchronizacja" in status or "efekt" in status \
-                    or "połączono" in status or "profil" in status or "gra" in status:
-                color = theme.OK
-            else:
-                color = theme.WARN
+            text = f"Razer: {self.service.razer_status}"
+            color = {"ok": theme.OK, "error": theme.ERROR}.get(self.service.status_level(), theme.WARN)
         self.status_var.set(text)
         self.dot.delete("all")
         d = self.px(14)
