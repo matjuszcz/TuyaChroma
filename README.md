@@ -164,6 +164,16 @@ Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life 
 
 **Program pamięta, czego nauczył się o światłach** (np. że Light Bar restartuje się po ok. 3 minutach połączenia albo że jakieś światło trzeba wolniej zasilać kolorami) – także po ponownym uruchomieniu. Gdy światło przez 14 dni nie sprawia nowych kłopotów, program zapomina o nim sam. Żeby zacząć od nowa od razu (np. po zmianie zasilacza), kliknij światło w tabeli prawym przyciskiem → *Zapomnij, czego program nauczył się o tym świetle*. Zmiana *Szybkości zmian* w ustawieniach światła też zaczyna naukę tempa od nowa.
 
+### Kalibracja kamerą
+
+*Światła → Kalibracja kamerą…* mierzy kamerą internetową (albo telefonem używanym jako kamera), kiedy każde światło **naprawdę** zmienia kolor w porównaniu z klawiaturą, i samo ustawia każdemu światłu *Korektę (ms)*. Program sam z siebie wie tylko, kiedy światło potwierdziło polecenie – nie widzi, kiedy faktycznie zmieniło barwę ani jak długo trwa jego płynne przejście.
+
+1. Ustaw kamerę tak, żeby widziała klawiaturę (albo jej poświatę) i pokój, w którym świecą światła. Same światła nie muszą być w kadrze. Najlepiej po zmroku, bez ruchu przed kamerą.
+2. Kliknij *Rozpocznij pomiar*. Program na chwilę wstrzymuje efekt i po kolei kilka razy rozjaśnia klawiaturę i każde światło (ok. 10 s na światło).
+3. W tabeli zobaczysz, o ile każde światło zmienia się później niż klawiatura i jaką dostanie korektę. *Zastosuj korekty* zapisuje je.
+
+Opóźnienie samej kamery nie ma znaczenia: klawiatura i światła są mierzone tą samą kamerą, więc się znosi. Kalibrację warto powtórzyć po zmianie *Szybkości zmian*, zasilacza albo routera.
+
 ### 6. Opóźnienie synchronizacji
 
 Każda zmiana koloru leci do żarówki przez Wi-Fi, a żarówka sama płynnie przechodzi między kolorami, więc żarówki są trochę w tyle za klawiaturą.

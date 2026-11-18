@@ -373,6 +373,7 @@ class App:
         ttk.Button(bar, text="Odśwież z konta", command=self.refresh_from_account).pack(side="left")
         ttk.Button(bar, text="Szukaj w sieci", command=self.scan_lan).pack(side="left", padx=6)
         ttk.Button(bar, text="Dobierz ustawienia automatycznie", command=self.auto_tune).pack(side="left")
+        ttk.Button(bar, text="Kalibracja kamerą…", command=self.calibrate_with_camera).pack(side="left", padx=6)
 
         cols = ("on", "name", "ip", "version", "source", "zone", "latency", "status")
         table = ttk.Frame(tab)
@@ -1555,6 +1556,12 @@ class App:
         self.run_bg(devices_db.update, done, failed)
 
     # -------------------------------------------------------------- account
+
+    def calibrate_with_camera(self) -> None:
+        """Measure with a webcam when the lights really change (see calibrate.py)."""
+        from .calibrate_gui import open_window  # noqa: PLC0415
+
+        open_window(self)
 
     def auto_tune(self) -> None:
         """Check what each bulb is and how it behaves; propose the best settings."""

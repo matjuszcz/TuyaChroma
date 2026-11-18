@@ -370,6 +370,7 @@ class SyncService:
         self.razer_level = "warn"  # "ok" / "warn" / "error", set with every status
         self._settings = None
         self._background_apps: set[int] = set()
+        self.calibrating = False  # camera calibration: dispatch paused
         self.game_active = False
         self.game_name = ""
         self.other_apps: dict[int, str] = {}  # running Chroma apps treated as games
@@ -894,9 +895,10 @@ class SyncService:
                         effect_color = functools.partial(self._bulb_effect_color,
                                                          settings=settings, profile=profile,
                                                          at=clock.time)
-                    dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
-                             profile, clock.allow, KEYBOARD_AREAS[self.keyboard_layout], effect_color,
-                             effect_source)
+                    if not self.calibrating:  # (the camera calibration drives the lights)
+                        dispatch(self.workers, frames, idle, self.game_active, profile_frames, strip,
+                                 profile, clock.allow, KEYBOARD_AREAS[self.keyboard_layout], effect_color,
+                                 effect_source)
                     self._set_status(*self._status_text(idle, profile.name))
                     spent = time.monotonic() - started
                     if spent < period:

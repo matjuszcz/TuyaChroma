@@ -36,6 +36,10 @@ class EffectPlayer(threading.Thread):
         self._strip: list[RGB] = []
         self._output = None
         self.paused = False
+        # Camera calibration: every device shows this color; override_sent is
+        # (time, color) of the first frame sent with it.
+        self.override: RGB | None = None
+        self.override_sent: tuple[float, RGB] | None = None
         # A game runs: let go of the Chroma SDK so the game gets the Razer devices
         # (otherwise Synapse may keep showing our effect instead of the game's).
         self.yielded = False
@@ -119,7 +123,15 @@ class EffectPlayer(threading.Thread):
                             except Exception:  # noqa: BLE001 - as above: keep the player alive
                                 _LOGGER.debug("Extended frame rendering failed", exc_info=True)
                                 extended = {}
-                            self._send({**frames, **extended})
+                            out = {**frames, **extended}
+                            override = self.override
+                            if override is not None:
+                                out = {name: [override] * len(colors) for name, colors in out.items()}
+                            sent_at = time.monotonic()
+                            self._send(out)
+                            if override is not None and (self.override_sent is None
+                                                         or self.override_sent[1] != override):
+                                self.override_sent = (sent_at, override)
                 spent = time.monotonic() - started
                 self._stop_event.wait(max(0.0, self._period - spent))
         finally:

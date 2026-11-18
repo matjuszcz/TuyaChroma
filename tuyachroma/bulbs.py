@@ -343,6 +343,7 @@ class BulbWorker(threading.Thread):
         self._connect_dps: dict = {}
         self._no_ack_streak = 0
         self._no_ack_warned = False
+        self.last_sent: tuple[float, RGB] | None = None
         self._connected_at = 0.0
 
     # ------------------------------------------------------------ public API
@@ -666,7 +667,9 @@ class BulbWorker(threading.Thread):
             if (self._sent is not None and distance(self._sent, target) < 3
                     and now - last_send < REFRESH_EVERY):
                 continue
+            sent_at = time.monotonic()
             self._send(target)
+            self.last_sent = (sent_at, target)  # when this color went out (camera calibration)
             last_send = time.monotonic()
 
     def _send(self, rgb: RGB) -> None:

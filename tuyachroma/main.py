@@ -116,6 +116,8 @@ def selftest_child() -> int:
 
         importlib.import_module("PIL._imaging")  # the module missing in the log
         importlib.import_module("pystray")
+        importlib.import_module("cv2")  # camera calibration
+        importlib.import_module("tuyachroma.calibrate_gui")
         if not Path(certifi.where()).exists():
             raise FileNotFoundError(certifi.where())
     except Exception:  # noqa: BLE001

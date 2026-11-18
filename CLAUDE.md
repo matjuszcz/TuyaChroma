@@ -29,7 +29,7 @@ while it runs.
 
 ## Commands
 - Tests (Linux needs xvfb for Tk): `xvfb-run -a python -m pytest -q`. Baseline:
-  324 passed, 11 skipped. Run it twice after changes (timing tests).
+  329 passed, 11 skipped. Run it twice after changes (timing tests).
 - Lint: `python -m pyflakes tuyachroma tests`
 - GUI screenshot: build a Tk app with test data under xvfb (see tests/test_app.py
   for how to construct `App`).
@@ -102,6 +102,14 @@ Other rules:
   - Rotated refresh tokens are saved at once via `_token_listener`/`on_token`, so
     the login doesn't expire.
 - `advisor.py`: "Dobierz ustawienia" (auto-tune) from device reports.
+- `calibrate.py` / `calibrate_gui.py`: camera calibration (OpenCV, lazy import;
+  opencv-python-headless + numpy in requirements). With dispatch paused
+  (`SyncService.calibrating`) the keyboard (`player.override`) and then each light
+  step dark -> white; the time from the send (`player.override_sent`,
+  `worker.last_sent`) to the middle of the picture's change is measured. Light
+  minus keyboard cancels the camera's own delay; the result sets each light's
+  `latency_adjust_ms` so its fade's middle meets the keyboard's change. The CI
+  self-test imports cv2 in the built exe.
 - `config.py`: Device and Settings dataclasses. `config_rev` migrations. Default
   method "auto"; `effect_sync` "precise".
 - `gui.py`: tkinter app.
