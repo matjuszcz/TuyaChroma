@@ -15,10 +15,12 @@ shine into; the lights themselves needn't be in the picture.
 
 from __future__ import annotations
 
+from array import array
 import bisect
 from collections import deque
 from dataclasses import dataclass, field
 import logging
+import math
 import statistics
 import sys
 import threading
@@ -34,6 +36,8 @@ STEP = 1.6                     # s each step is held (the camera's exposure sett
 TRIALS = 3
 MIN_CHANGE = 6.0               # gray levels: less than this, the camera didn't see it
 SETTLE = 1.2                   # s of dark before the first step
+CLIPPED = 250.0                # gray level: overexposed (the camera can't show more)
+SPREAD_MAX = 150.0             # ms: trials further apart than this are not trusted
 
 
 Sample = tuple[float, list[float]]  # (monotonic time, gray level per area)
@@ -89,7 +93,9 @@ class Camera:
 
     def close(self) -> None:
         self._stop.set()
-        self._thread.join(1.0)
+        self._thread.join(3.0)
+        if self._thread.is_alive():
+            return  # a read still hangs in the driver: releasing now could crash it
         try:
             self._cap.release()
         except Exception:  # noqa: BLE001
@@ -143,15 +149,20 @@ def response_time(samples: list[Sample], command_at: float) -> float | None:
     after = [(t, g) for t, g in samples if t >= command_at]
     if len(before) < 2 or len(after) < 4:
         return None
-    end = after[-1][0]
-    late = [g for t, g in after if t >= end - 0.35]
     base = [statistics.fmean(c) for c in zip(*before[-6:])]
-    final = [statistics.fmean(c) for c in zip(*late)]
+    # The change is measured to its peak (3 frames averaged against noise), not
+    # to the last frames: a webcam's auto-exposure pulls a brightened picture
+    # back down, which made a slowly fading light look early.
+    smooth = [[statistics.fmean(c) for c in zip(*[g for _t, g in after[i:i + 3]])]
+              for i in range(max(1, len(after) - 2))]
+    final = [max(column) for column in zip(*smooth)]
     delta = [f - b for f, b in zip(final, base)]
-    strongest = max(abs(d) for d in delta)
+    # (areas at white are clipped by the camera: their change is cut short)
+    usable = [d if f < CLIPPED else 0.0 for d, f in zip(delta, final)]
+    strongest = max(usable)
     if strongest < MIN_CHANGE:
         return None
-    cells = [i for i, d in enumerate(delta) if abs(d) >= 0.6 * strongest]
+    cells = [i for i, d in enumerate(usable) if d >= 0.6 * strongest]  # (bright steps: up)
 
     def level(grid: list[float]) -> float:
         return statistics.fmean((grid[i] - base[i]) / delta[i] for i in cells)
@@ -179,6 +190,7 @@ class LightResult:
     relative_ms: float | None = None   # later than the keyboard by this much
     current_ms: float = 0.0            # how far ahead it is sent now (without correction)
     adjust_ms: int | None = None       # the correction that makes it change with the keyboard
+    uncertain: bool = False            # the trials disagreed (movement in the picture?)
 
 
 @dataclass
@@ -195,26 +207,52 @@ class Result:
     message: str = ""
     commands: list[Command] = field(default_factory=list)  # for a phone video
     step: float = STEP
+    spread: dict[str, float] = field(default_factory=dict)  # who -> ms between trials
+
+
+class Interrupted(Exception):
+    """A game took the Razer devices, or the window was closed."""
+
+
+_run_lock = threading.Lock()  # one calibration at a time
 
 
 def run(service, camera, progress: Callable[[str], None] = lambda _t: None,
-        trials: int = TRIALS, step: float = STEP, stop: threading.Event | None = None) -> Result:
+        trials: int = TRIALS, step: float = STEP, stop: threading.Event | None = None,
+        between: Callable[[], bool] | None = None) -> Result:
     """Step the keyboard and every light; the sync is paused meanwhile.
 
     With a camera the responses are measured right away. Without one
     (``camera=None``: a phone films it) only the command times are kept, for
-    analyze_video() to match the recording against.
+    analyze_video() to match the recording against. ``between`` is called after
+    the keyboard (e.g. to turn the camera from the keyboard to the room); it
+    returns False to give up.
     """
     stop = stop or threading.Event()
     player = service.player
     workers = list(service.workers)
     result = Result(step=step)
     if player is None or not getattr(player, "output_ready", False):
-        result.message = "Urządzenia Razer nie są teraz sterowane przez program – kalibracja potrzebuje klawiatury."
+        result.message = ("Urządzenia Razer nie są teraz sterowane przez program – kalibracja potrzebuje "
+                          "klawiatury (Ustawienia → „Pełna synchronizacja”).")
         return result
     if service.game_active:
         result.message = "Gra steruje teraz urządzeniami Razer – zamknij ją i spróbuj ponownie."
         return result
+    if not workers:
+        result.message = "Żadne światło nie jest teraz sterowane – zaznacz światła w zakładce „Światła”."
+        return result
+    if not _run_lock.acquire(blocking=False):
+        result.message = "Kalibracja już trwa."
+        return result
+
+    def check() -> None:
+        if stop.is_set():
+            raise Interrupted("")
+        if (service.game_active or getattr(player, "yielded", False)
+                or getattr(player, "paused", False) or not getattr(player, "output_ready", True)):
+            raise Interrupted("Gra przejęła urządzenia Razer – pomiar przerwany. Spróbuj po zamknięciu gry.")
+
     service.calibrating = True
     try:
         player.override = DARK
@@ -223,37 +261,49 @@ def run(service, camera, progress: Callable[[str], None] = lambda _t: None,
         _wait(SETTLE, stop)
 
         def keyboard_step(color) -> float | None:
+            asked = time.monotonic()
             player.override = color
-            return _wait_for(lambda: _sent_at(player.override_sent, color), 1.0, stop)
+            return _wait_for(lambda: _sent_after(player.override_sent, color, asked), 1.0, stop)
 
         progress("Klawiatura…")
-        result.keyboard_ms = _measure(camera, keyboard_step, "keyboard", result, trials, step, stop)
+        result.keyboard_ms = _measure(camera, keyboard_step, "keyboard", result, trials, step, stop, check)
         if camera is not None and result.keyboard_ms is None:
             result.message = ("Kamera nie widzi zmiany na klawiaturze – ustaw ją tak, żeby widziała "
                               "klawiaturę (albo jej poświatę) i spróbuj ponownie.")
             return result
+        if between is not None:
+            progress("Skieruj kamerę na pokój…")
+            if not between():
+                raise Interrupted("")
+            _wait(SETTLE, stop)  # (the camera's exposure settles on the new picture)
         settings = service._settings
         for n, w in enumerate(workers, 1):
-            if stop.is_set():
-                break
+            check()
             progress(f"{w.cfg.name} ({n}/{len(workers)})…")
             light = LightResult(w.cfg.id, w.cfg.name)
             light.current_ms = (service.latency_offset_ms(w, settings)
                                 - getattr(w.cfg, "latency_adjust_ms", 0))
 
             def light_step(color, w=w) -> float | None:
+                asked = time.monotonic()
                 w.set_color(color)
-                return _wait_for(lambda: _sent_at(getattr(w, "last_sent", None), color), 1.5, stop)
+                return _wait_for(lambda: _sent_after(getattr(w, "last_sent", None), color, asked),
+                                 1.5, stop)
 
-            light.response_ms = _measure(camera, light_step, w.cfg.id, result, trials, step, stop)
+            light.response_ms = _measure(camera, light_step, w.cfg.id, result, trials, step, stop, check)
             result.lights.append(light)
             w.set_color(DARK)
         _finish(result)
         progress("Gotowe.")
         return result
+    except Interrupted as err:
+        result.message = str(err) or "Pomiar przerwany."
+        result.lights = []
+        return result
     finally:
         player.override = None
         service.calibrating = False
+        _run_lock.release()
 
 
 def _finish(result: Result) -> None:
@@ -263,7 +313,11 @@ def _finish(result: Result) -> None:
             light.relative_ms = light.adjust_ms = None
             continue
         light.relative_ms = light.response_ms - result.keyboard_ms
-        light.adjust_ms = max(-1000, min(1000, round(light.relative_ms - light.current_ms)))
+        light.uncertain = max(result.spread.get(light.dev_id, 0.0),
+                              result.spread.get("keyboard", 0.0)) > SPREAD_MAX
+        # (an uncertain measurement isn't applied: measure again)
+        light.adjust_ms = None if light.uncertain else max(
+            -1000, min(1000, round(light.relative_ms - light.current_ms)))
     if result.keyboard_ms is not None and result.lights:
         _LOGGER.info("Camera calibration: keyboard %.0f ms; %s", result.keyboard_ms, "; ".join(
             f"{r.name}: {'-' if r.response_ms is None else round(r.response_ms)} ms "
@@ -271,17 +325,17 @@ def _finish(result: Result) -> None:
 
 
 def _measure(camera, step_to, who: str, result: Result, trials: int, step: float,
-             stop: threading.Event) -> float | None:
+             stop: threading.Event, check: Callable[[], None] = lambda: None) -> float | None:
     """Median response (ms) over a few dark -> bright steps; None if not seen."""
     times = []
     for _ in range(trials):
-        if stop.is_set():
-            return None
+        check()
         command_at = step_to(BRIGHT)
         if command_at is None:
             continue
         result.commands.append(Command(who, command_at, True))
         _wait(step, stop)
+        check()
         if camera is not None:
             seen = response_time(camera.samples(command_at - 0.6), command_at)
             if seen is not None:
@@ -292,32 +346,41 @@ def _measure(camera, step_to, who: str, result: Result, trials: int, step: float
         _wait(step, stop)
     if camera is None or len(times) < max(1, trials - 1):
         return None
+    result.spread[who] = max(times) - min(times)
     return statistics.median(times)
 
 
 # ---------------------------------------------------------------- a phone video
 
 
-def read_video(path: str) -> list[Sample]:
+MAX_VIDEO = 20 * 60.0  # s of a recording read at most (a wrong file must not fill the memory)
+
+
+def read_video(path: str, max_seconds: float = MAX_VIDEO,
+               stop: threading.Event | None = None) -> list[Sample]:
     """The frames of a recording, as (seconds from its start, grid)."""
     import cv2  # noqa: PLC0415
 
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
         raise OSError("nie udało się otworzyć filmu")
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if not fps or not math.isfinite(fps) or fps <= 0:
+        fps = 30.0
     samples: list[Sample] = []
     n = 0
     try:
-        while True:
+        while stop is None or not stop.is_set():
             ok, frame = cap.read()
             if not ok:
                 break
             ms = cap.get(cv2.CAP_PROP_POS_MSEC)
-            t = ms / 1000 if ms and ms > 0 else n / fps
+            t = ms / 1000 if ms and ms > 0 and math.isfinite(ms) else n / fps
+            if t > max_seconds:
+                break
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             grid = cv2.resize(gray, (GRID_W, GRID_H), interpolation=cv2.INTER_AREA)
-            samples.append((t, [float(v) for v in grid.flatten()]))
+            samples.append((t, array("f", grid.flatten().tolist())))  # (4 bytes a value)
             n += 1
     finally:
         cap.release()
@@ -337,31 +400,48 @@ def analyze_video(samples: list[Sample], result: Result) -> Result:
     if not result.commands:
         result.message = "Najpierw wykonaj pomiar, nagrywając go telefonem."
         return result
-    energy = [(t, sum(abs(a - b) for a, b in zip(g, prev)))
-              for (t, g), (_pt, prev) in zip(samples[1:], samples)]
-    times = [t for t, _e in energy]
-    values = [e for _t, e in energy]
+    # The picture's overall brightness over time (smoothed over 3 frames)
+    times = [t for t, _g in samples]
+    level = [statistics.fmean(g) for _t, g in samples]
+    level = [statistics.fmean(level[max(0, i - 1):i + 2]) for i in range(len(level))]
     first = result.commands[0].at
     rel = [c.at - first for c in result.commands]
+    signs = [1.0 if c.bright else -1.0 for c in result.commands]
     span = rel[-1] + result.step
-    video_len = times[-1] - times[0]
-    if video_len < span - 1.0:
+    if times[-1] - times[0] < span - 1.0:
         result.message = ("Film jest krótszy niż pomiar – nagrywaj od chwili przed kliknięciem "
                           "„Rozpocznij” do napisu „Gotowe”.")
         return result
-    # the offset: where in the video the first command was given
-    best, best_score = None, -1.0
+
+    def at(t: float) -> float:
+        return level[min(len(level) - 1, bisect.bisect_left(times, t))]
+
+    # The offset: where in the video the first command was given. A candidate
+    # scores how much the picture brightens (bright steps) or darkens (dark
+    # ones) from each command to WINDOW later - signed, so a shift by one step
+    # doesn't fit. Every offset putting each command before its change and the
+    # change within the window scores the same (a plateau); its late end is
+    # where a command meets the earliest change (the keyboard's) - just before
+    # it every command precedes its change, as the measurement needs. A constant
+    # error cancels between the keyboard and the lights.
+    window = 1.1
     step = (times[-1] - times[0]) / max(1, len(times) - 1)
+    offsets, scores = [], []
     offset = times[0]
     while offset + span <= times[-1] + 1.0:
-        score = 0.0
-        for r in rel:
-            i, j = bisect.bisect_left(times, offset + r), bisect.bisect_right(times, offset + r + 0.8)
-            score += max(values[i:j], default=0.0)
-        if score > best_score:
-            best, best_score = offset, score
+        offsets.append(offset)
+        scores.append(sum(sign * (at(offset + r + window) - at(offset + r))
+                          for r, sign in zip(rel, signs)))
         offset += step
-    assert best is not None
+    if not scores:
+        result.message = "Nie udało się dopasować filmu do pomiaru."
+        return result
+    top = max(range(len(scores)), key=scores.__getitem__)
+    k = top
+    while (k + 1 < len(scores) and scores[k + 1] >= 0.97 * scores[top]
+           and offsets[k + 1] - offsets[top] < 0.6):
+        k += 1
+    best = offsets[k] - 0.12
     shifted = [(t - best + first, g) for t, g in samples]
     by_who: dict[str, list[float]] = {}
     for c in result.commands:
@@ -374,7 +454,10 @@ def analyze_video(samples: list[Sample], result: Result) -> Result:
 
     def median(who: str) -> float | None:
         values = by_who.get(who, [])
-        return statistics.median(values) if len(values) >= 2 else None
+        if len(values) < 2:
+            return None
+        result.spread[who] = max(values) - min(values)
+        return statistics.median(values)
 
     result.keyboard_ms = median("keyboard")
     if result.keyboard_ms is None:
@@ -388,8 +471,9 @@ def analyze_video(samples: list[Sample], result: Result) -> Result:
     return result
 
 
-def _sent_at(sent, color) -> float | None:
-    if sent and tuple(sent[1]) == tuple(color):
+def _sent_after(sent, color, asked: float) -> float | None:
+    """When the color went out - only a send made after it was asked for."""
+    if sent and tuple(sent[1]) == tuple(color) and sent[0] >= asked:
         return sent[0]
     return None
 

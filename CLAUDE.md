@@ -29,7 +29,7 @@ while it runs.
 
 ## Commands
 - Tests (Linux needs xvfb for Tk): `xvfb-run -a python -m pytest -q`. Baseline:
-  332 passed, 11 skipped. Run it twice after changes (timing tests).
+  341 passed, 11 skipped. Run it twice after changes (timing tests).
 - Lint: `python -m pyflakes tuyachroma tests`
 - GUI screenshot: build a Tk app with test data under xvfb (see tests/test_app.py
   for how to construct `App`).
@@ -87,7 +87,9 @@ Other rules:
     full (switch + mode) send is confirmed.
   - tests/fake_tuya.py: a fake v3.3 light on localhost for real-protocol tests.
   - Learned per-light state: slow rate, drop age (renew the connection before the
-    bulb resets), `rate_not_the_cause`, `_music_hangs`. Persisted in
+    bulb resets), `rate_not_the_cause`, `_music_hangs`. Drop lessons count only if
+    the light is back within REBOOT_MAX (90 s: a reboot); longer = switched off,
+    nothing learned (`_judge_drop`). A speed change forgets only the rate. Persisted in
     `%APPDATA%/TuyaChroma/learned.json` (`load_learned` at startup in main.py,
     `_remember` on every change), forgotten after LEARNED_KEEP_DAYS (14) without
     news, or via the lights table's right-click menu / a manual speed change.
@@ -111,8 +113,15 @@ Other rules:
   `latency_adjust_ms` so its fade's middle meets the keyboard's change. The CI
   self-test imports cv2 in the built exe.
   Phone mode: `run(service, None)` only records `result.commands`; the owner films
-  it, `read_video` + `analyze_video` find the phone clock's offset (the command
-  train against the picture's change energy) and measure each step the same way.
+  it, `read_video` + `analyze_video` find the phone clock's offset (signed
+  brightness change after each command; the late end of the best plateau, minus a
+  margin, so every command precedes its change) and measure each step the same way.
+  Two-step option (`between`): keyboard first, then the camera is turned to the
+  room ("Dalej"). Lights needn't be in frame. Clipped (>=250) areas are ignored;
+  trials more than 150 ms apart are "niepewne" and not applied. One run at a time
+  (`_run_lock`, one window); a game taking over interrupts it; the camera closes
+  when the main window goes to the tray. tests/test_calibrate.py uses a virtual
+  clock (fast).
 - `config.py`: Device and Settings dataclasses. `config_rev` migrations. Default
   method "auto"; `effect_sync` "precise".
 - `gui.py`: tkinter app.

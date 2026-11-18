@@ -2,13 +2,40 @@
 
 from __future__ import annotations
 
+import random
+import threading
 import time
 from types import SimpleNamespace
+
+import pytest
 
 from tuyachroma import calibrate, engine
 from tuyachroma.config import AppConfig
 
 FPS = 30.0
+
+
+class Clock:
+    """A virtual clock: the run's waits pass instantly (and exactly)."""
+
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def monotonic(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.t += seconds
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = Clock()
+    fake = SimpleNamespace(monotonic=c.monotonic, sleep=c.sleep, time=time.time)
+    monkeypatch.setattr(calibrate, "time", fake)
+    monkeypatch.setattr(__import__(__name__), "time", fake, raising=False)
+    monkeypatch.setattr(calibrate, "_wait", lambda s, stop: None if stop.is_set() else c.sleep(s))
+    return c
 
 
 class World:
@@ -100,6 +127,7 @@ def _service(world: World, lights: list[FakeLight]):
     return service
 
 
+@pytest.mark.usefixtures("clock")
 def test_calibration_finds_how_much_earlier_each_light_must_get_its_colors() -> None:
     # keyboard: 40 ms; GU10: 180 ms + a 250 ms fade (middle at 305 ms); slow strip: 420 ms + 250
     world = World(0.04, {"gu": (0.18, 0.25), "strip": (0.42, 0.25)})
@@ -117,6 +145,7 @@ def test_calibration_finds_how_much_earlier_each_light_must_get_its_colors() -> 
     assert service.calibrating is False and service.player.override is None
 
 
+@pytest.mark.usefixtures("clock")
 def test_camera_that_does_not_see_the_keyboard_says_so() -> None:
     world = World(0.04, {"gu": (0.18, 0.25)})
 
@@ -172,7 +201,7 @@ def test_calibration_window_measures_and_applies(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(calibrate, "available", lambda: True)
     monkeypatch.setattr(calibrate, "find_cameras", lambda: [0])
     monkeypatch.setattr(calibrate, "Camera", Cam)
-    monkeypatch.setattr(calibrate, "run", lambda service, camera, progress, stop=None: result)
+    monkeypatch.setattr(calibrate, "run", lambda service, camera, progress, stop=None, between=None: result)
     config = AppConfig(devices=[dev("a", enabled=True), dev("b", enabled=True)])
     service = engine.SyncService(reader_factory=FakeReader, worker_factory=Recorder,
                                  service_check=lambda: True)
@@ -199,6 +228,7 @@ def test_calibration_window_measures_and_applies(tmp_path, monkeypatch) -> None:
         app.root.destroy()
 
 
+@pytest.mark.usefixtures("clock")
 def test_phone_video_is_matched_to_the_commands() -> None:
     """Steps filmed with a phone: its clock is unknown (another start, another delay)."""
     world = World(0.04, {"gu": (0.18, 0.25), "strip": (0.42, 0.25)})
@@ -258,8 +288,8 @@ def test_calibration_window_phone_flow(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(calibrate, "available", lambda: True)
     monkeypatch.setattr(calibrate, "find_cameras", lambda: [])
-    monkeypatch.setattr(calibrate, "run", lambda service, camera, progress, stop=None: recorded)
-    monkeypatch.setattr(calibrate, "read_video", lambda path: [])
+    monkeypatch.setattr(calibrate, "run", lambda service, camera, progress, stop=None, between=None: recorded)
+    monkeypatch.setattr(calibrate, "read_video", lambda path, max_seconds=0, stop=None: [])
     monkeypatch.setattr(calibrate, "analyze_video", analyzed)
     monkeypatch.setattr(calibrate_gui.filedialog, "askopenfilename", lambda **k: "clip.mov")
     config = AppConfig(devices=[dev("a", enabled=True)])
@@ -287,3 +317,112 @@ def test_calibration_window_phone_flow(tmp_path, monkeypatch) -> None:
         win.close()
     finally:
         app.root.destroy()
+
+
+@pytest.mark.usefixtures("clock")
+def test_noisy_phone_video_with_a_pause_to_turn_the_phone() -> None:
+    """Real recordings: sensor noise, the phone moved at the start, end and between
+    the keyboard and the lights (turned from the keyboard to the ceiling)."""
+    world = World(0.04, {"gu": (0.18, 0.25), "strip": (0.42, 0.25)})
+    lights = [FakeLight(world, "gu", latency_ms=120), FakeLight(world, "strip", latency_ms=300)]
+    service = _service(world, lights)
+    started = time.monotonic() - 3.0
+    turned = []
+
+    def turn_the_phone() -> bool:
+        turned.append(time.monotonic())
+        time.sleep(4.0)  # the owner turns the phone and clicks "Dalej"
+        turned.append(time.monotonic())
+        return True
+
+    result = calibrate.run(service, None, trials=3, step=1.6, between=turn_the_phone)
+    world.camera_lag = 0.25
+    rng = random.Random(7)
+    end = time.monotonic() + 1.0
+    video, t = [], started
+    while t <= end:
+        grid = [v + rng.gauss(0, 3) for v in world.grid(t)]
+        if t < started + 0.6 or t > end - 0.6 or turned[0] < t < turned[1]:
+            grid = [v + rng.uniform(-60, 60) for v in grid]  # the phone moving
+        video.append((t - started + 7.0, grid))
+        t += 1 / FPS
+    calibrate.analyze_video(video, result)
+    assert not result.message, result.message
+    gu, strip = result.lights
+    assert abs(gu.relative_ms - 265) < 40 and abs(strip.relative_ms - 505) < 40
+
+
+@pytest.mark.usefixtures("clock")
+def test_stop_midway_gives_everything_back() -> None:
+    world = World(0.04, {"gu": (0.18, 0.25)})
+    service = _service(world, [FakeLight(world, "gu", 100)])
+    stop = threading.Event()
+
+    def progress(text: str) -> None:
+        if text.startswith("gu"):
+            stop.set()  # the window was closed
+
+    result = calibrate.run(service, FakeCamera(world), progress, trials=2, step=1.2, stop=stop)
+    assert service.calibrating is False and service.player.override is None
+    assert result.lights == [] and result.message
+
+
+@pytest.mark.usefixtures("clock")
+def test_a_game_starting_midway_ends_the_run() -> None:
+    world = World(0.04, {"gu": (0.18, 0.25)})
+    service = _service(world, [FakeLight(world, "gu", 100)])
+
+    def progress(text: str) -> None:
+        if text.startswith("gu"):
+            service.game_active = True
+
+    result = calibrate.run(service, FakeCamera(world), progress, trials=2, step=1.2)
+    assert "Gra" in result.message and service.calibrating is False
+
+
+def test_player_override_shows_one_color_everywhere() -> None:
+    from tuyachroma.player import EffectPlayer
+    from tuyachroma.profiles import Profile
+    from tuyachroma.render import Renderer
+
+    sent = []
+
+    class Out:
+        def send_frames(self, frames):
+            sent.append(frames)
+
+        def close(self):
+            pass
+
+    player = EffectPlayer(Renderer(Profile(effect="spectrum")), 1, output_factory=Out, fps=50)
+    player.start()
+    try:
+        end = time.time() + 2
+        while time.time() < end and not sent:
+            time.sleep(0.01)
+        player.override = (255, 255, 255)
+        while time.time() < end and player.override_sent is None:
+            time.sleep(0.01)
+        assert player.override_sent[1] == (255, 255, 255)
+        frames = sent[-1]
+        assert all(set(colors) == {(255, 255, 255)} for colors in frames.values())
+    finally:
+        player.stop()
+
+
+def test_overexposed_areas_do_not_count() -> None:
+    """A bright room: the camera clips at white, which cut the change short."""
+    samples = []
+    for i in range(80):
+        ramp = 0.0 if i < 30 else min(1.0, (i - 30) / 6)
+        clipped = min(255.0, 200 + 120 * ramp)     # overexposed area
+        clean = 40 + 100 * ramp                    # a normally lit area
+        samples.append((i / 30, [clipped, clean]))
+    assert abs(calibrate.response_time(samples, 1.0) - 0.1) < 0.02
+
+
+def test_disagreeing_trials_are_not_applied() -> None:
+    result = calibrate.Result(keyboard_ms=100.0, lights=[calibrate.LightResult("a", "A", 600.0)],
+                              spread={"keyboard": 20.0, "a": 400.0})
+    calibrate._finish(result)
+    assert result.lights[0].uncertain and result.lights[0].adjust_ms is None

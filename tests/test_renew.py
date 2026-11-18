@@ -176,3 +176,42 @@ def test_old_lessons_are_forgotten(tmp_path) -> None:
     bulbs.load_learned(path)
     assert bulbs.learned_slow_interval("x") == 0.0 and bulbs.learned_slow_interval("y") == 0.6
     assert bulbs.learned_slow_interval("w") == 0.0
+
+
+def test_a_light_switched_off_teaches_nothing(tmp_path, monkeypatch) -> None:
+    """Power cut by hand while syncing: not a reboot - no slower rate, no renewal time."""
+    bulbs.load_learned(tmp_path / "learned.json")
+    w = BulbWorker(BulbConfig(name="RGB Biuro 1", id="gu", ip="1", local_key="k", min_interval=0.1),
+                   device_factory=lambda _cfg: FakeBulb())
+    for away in (400.0, 410.0):  # two power cuts after a similar connection age
+        w._pending_drop = (time.monotonic() - 600.0, away)
+        w._slow_down(dropped_off=True)
+        w._judge_drop()  # back after 10 minutes
+    assert bulbs.learned_max_age("gu") == 0.0 and bulbs.learned_slow_interval("gu") == 0.0
+    assert w.slow_interval == 0.0
+    assert not (tmp_path / "learned.json").exists() or "gu" not in (tmp_path / "learned.json").read_text()
+    # a real reboot (back within seconds) is learned and kept
+    for age in (183.0, 185.0):
+        w._pending_drop = (time.monotonic() - 20.0, age)
+        w._judge_drop()
+    assert bulbs.learned_max_age("gu") == 183.0 - bulbs.RENEW_EARLY
+    assert "gu" in (tmp_path / "learned.json").read_text()
+
+
+def test_speed_change_forgets_only_the_rate(tmp_path) -> None:
+    bulbs.load_learned(tmp_path / "learned.json")
+    bulbs._learned_slow["lb"] = 0.6
+    bulbs._max_age["lb"] = 150.0
+    bulbs._music_hangs.add("lb")
+    bulbs.forget_learned("lb", rate_only=True)
+    assert bulbs.learned_slow_interval("lb") == 0.0
+    assert bulbs.learned_max_age("lb") == 150.0 and "lb" in bulbs._music_hangs
+
+
+def test_damaged_learned_file_never_stops_the_program(tmp_path) -> None:
+    path = tmp_path / "learned.json"
+    for text in ('{"x": {"at": 1e999999, "slow": 0.6}}', '{"x": {"at": 10' + "0" * 400 + '}}',
+                 "[" * 100000, '{"x": {"at": Infinity, "max_age": Infinity}}', "junk"):
+        path.write_text(text)
+        bulbs.load_learned(path)  # no exception
+    assert bulbs.learned_max_age("x") == 0.0

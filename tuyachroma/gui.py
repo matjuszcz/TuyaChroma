@@ -399,7 +399,9 @@ class App:
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<Button-3>", self._tree_menu)  # right click
-        self._light_menu = tk.Menu(self.root, tearoff=0)
+        self._light_menu = tk.Menu(self.root, tearoff=0, background=theme.SURFACE,
+                                   foreground=theme.INK, activebackground=theme.SELECT,
+                                   activeforeground=theme.INK, borderwidth=1)
         self._light_menu.add_command(label="Zapomnij, czego program nauczył się o tym świetle",
                                      command=lambda: self._forget_light(self._menu_dev_id))
         self._menu_dev_id = ""
@@ -1005,12 +1007,16 @@ class App:
         if not row:
             return
         self._menu_dev_id = row
+        self.tree.selection_set(row)  # the menu acts on the light the editor shows
+        dev = self.config.device(row)
+        self._light_menu.entryconfigure(
+            0, label=f"Zapomnij, czego program nauczył się o „{dev.name if dev else row}”")
         try:
             self._light_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self._light_menu.grab_release()
 
-    def _forget_light(self, dev_id: str, quiet: bool = False) -> None:
+    def _forget_light(self, dev_id: str, quiet: bool = False, rate_only: bool = False) -> None:
         """Drop what the program learned about a light (slower rate, renewal time):
         e.g. after a new power supply, it is learned again from scratch."""
         from .bulbs import forget_learned  # noqa: PLC0415
@@ -1018,7 +1024,7 @@ class App:
         dev = self.config.device(dev_id)
         if dev is None:
             return
-        forget_learned(dev_id)
+        self.run_bg(lambda: forget_learned(dev_id, rate_only))  # (writes a file: not on this thread)
         for worker in list(getattr(self.service, "workers", [])):
             if worker.cfg.id == dev_id:
                 worker.slow_interval = 0.0  # its full rate again, now
@@ -1072,7 +1078,7 @@ class App:
         if "speed" in changed:
             dev.min_interval = next((k for k, v in SPEED_LABELS.items() if v == shown["speed"]), 0.15)
             # the owner's choice: start learning this light's limits again from it
-            self._forget_light(dev.id, quiet=True)
+            self._forget_light(dev.id, quiet=True, rate_only=True)
         self._editor_snapshot = shown
         if asdict(dev) == before:
             if not quiet:

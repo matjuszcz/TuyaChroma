@@ -15,12 +15,16 @@ _LOGGER = logging.getLogger(__name__)
 INTRO = ("Program po kolei rozjaśni klawiaturę i każde światło (po kilka razy), a kamera "
          "zmierzy, kiedy naprawdę się zmieniają. Potem ustawi każdemu światłu korektę, żeby "
          "zmieniało kolor razem z klawiaturą.\n"
-         "Kamera (w komputerze albo telefon) ma widzieć klawiaturę (albo jej poświatę) i pokój, "
-         "w którym świecą światła – same światła nie muszą być w kadrze. Najlepiej po zmroku, "
-         "bez ruchu przed kamerą. Pomiar trwa ok. 10 s na każde światło.")
+         "Światła nie muszą być w kadrze – wystarczy, że kamera widzi pokój, który oświetlają "
+         "(ścianę, sufit). Jeśli klawiatura i pokój nie mieszczą się w jednym kadrze, odznacz "
+         "„w jednym kadrze”: program zmierzy najpierw klawiaturę, a potem poprosi o skierowanie "
+         "kamery na pokój. Najlepiej po zmroku, bez ruchu przed kamerą. Pomiar trwa ok. 10 s na "
+         "każde światło.")
 
 PHONE_STEPS = ("Telefonem: postaw telefon tak, żeby widział klawiaturę i pokój, włącz nagrywanie "
-               "filmu i kliknij „Rozpocznij pomiar”. Gdy pojawi się „Gotowe”, zatrzymaj nagrywanie, "
+               "filmu i kliknij „Rozpocznij pomiar” (bez „jednego kadru”: po klawiaturze obróć "
+               "telefon na pokój, nie przerywając nagrywania, i kliknij „Dalej”). Gdy pojawi się "
+               "„Gotowe”, zatrzymaj nagrywanie, "
                "przenieś film na komputer (kabel, iCloud, e-mail…) i kliknij „Wczytaj film…”.")
 
 
@@ -32,6 +36,7 @@ class CalibrationWindow:
         self._stop = threading.Event()
         self._running = False
         self._preview_image = None
+        self._next = threading.Event()
 
         win = self.win = tk.Toplevel(app.root, background=theme.CANVAS)
         win.title("Kalibracja kamerą")
@@ -44,10 +49,17 @@ class CalibrationWindow:
         modes = ttk.Frame(body)
         modes.pack(anchor="w", pady=(12, 0))
         self.mode = tk.StringVar(value="camera")
-        ttk.Radiobutton(modes, text="Kamera w komputerze (na żywo)", value="camera",
-                        variable=self.mode, command=self._mode_changed).pack(side="left")
-        ttk.Radiobutton(modes, text="Telefon (nagranie filmu)", value="phone",
-                        variable=self.mode, command=self._mode_changed).pack(side="left", padx=(16, 0))
+        self._controls = [
+            ttk.Radiobutton(modes, text="Kamera w komputerze (na żywo)", value="camera",
+                            variable=self.mode, command=self._mode_changed),
+            ttk.Radiobutton(modes, text="Telefon (nagranie filmu)", value="phone",
+                            variable=self.mode, command=self._mode_changed)]
+        self._controls[0].pack(side="left")
+        self._controls[1].pack(side="left", padx=(16, 0))
+        self.one_frame = tk.BooleanVar(value=True)
+        self._controls.append(ttk.Checkbutton(modes, text="klawiatura i pokój w jednym kadrze",
+                                              variable=self.one_frame))
+        self._controls[2].pack(side="left", padx=(16, 0))
         row = ttk.Frame(body)
         row.pack(anchor="w", pady=(8, 6))
         ttk.Label(row, text="Kamera:").pack(side="left")
@@ -61,6 +73,8 @@ class CalibrationWindow:
         self.load_button = ttk.Button(row, text="Wczytaj film…", command=self.load_video,
                                       state="disabled")
         self.load_button.pack(side="left", padx=(6, 0))
+        self.next_button = ttk.Button(row, text="Dalej", command=self._next.set, state="disabled")
+        self.next_button.pack(side="left", padx=(6, 0))
 
         self.preview = tk.Label(body, background=theme.PREVIEW, width=app.px(40), height=app.px(10))
         self.preview.pack(anchor="w", pady=(4, 8))
@@ -88,11 +102,23 @@ class CalibrationWindow:
 
     # ------------------------------------------------------------ camera
 
+    def _release_camera(self) -> None:
+        camera, self.camera = self.camera, None
+        if camera is not None:  # (joins its reader: off the window's thread)
+            threading.Thread(target=camera.close, name="camera-close", daemon=True).start()
+
+    def _set_running(self, running: bool) -> None:
+        self._running = running
+        state = "disabled" if running else "normal"
+        for control in self._controls:
+            control.configure(state=state)
+        self.camera_box.configure(state="disabled" if running or self.mode.get() == "phone"
+                                  else "readonly")
+        self.start_button.configure(state=state)
+
     def _mode_changed(self) -> None:
         if self.mode.get() == "phone":
-            if self.camera is not None:
-                self.camera.close()
-                self.camera = None
+            self._release_camera()
             self.camera_box.configure(state="disabled")
             self.start_button.configure(state="normal")
             self.status_var.set(PHONE_STEPS)
@@ -122,19 +148,28 @@ class CalibrationWindow:
 
     def _open_selected(self) -> None:
         index = self._indexes[self.camera_box.current()]
-        if self.camera is not None:
-            self.camera.close()
-            self.camera = None
-        try:
-            self.camera = calibrate.Camera(index)
-        except OSError as err:
-            self.status_var.set(f"Nie udało się otworzyć kamery: {err}")
-            return
-        self.start_button.configure(state="normal")
-        self.status_var.set("Ustaw kamerę, a potem kliknij „Rozpocznij pomiar”.")
+        self._release_camera()
+        self.start_button.configure(state="disabled")
+        self.status_var.set("Otwieram kamerę…")
+
+        def opened(camera) -> None:
+            if not self.win.winfo_exists() or self.mode.get() == "phone":
+                threading.Thread(target=camera.close, daemon=True).start()
+                return
+            self._release_camera()
+            self.camera = camera
+            self.start_button.configure(state="normal")
+            self.status_var.set("Ustaw kamerę, a potem kliknij „Rozpocznij pomiar”.")
+
+        # (opening a camera takes seconds on Windows: not on the window's thread)
+        self.app.run_bg(lambda: calibrate.Camera(index), opened,
+                        lambda err: self.status_var.set(f"Nie udało się otworzyć kamery: {err}"))
 
     def _tick(self) -> None:
         if not self.win.winfo_exists():
+            return
+        if not self.app._window_shown():
+            self.close()  # the main window went to the tray: the camera goes off too
             return
         if self.camera is not None:
             img = self.camera.preview(self.app.px(320))
@@ -151,18 +186,13 @@ class CalibrationWindow:
         phone = self.mode.get() == "phone"
         if self._running or (self.camera is None and not phone):
             return
+        self._set_running(True)
+        self._stop.clear()
+        self.load_button.configure(state="disabled")
+        self.apply_button.configure(state="disabled")
         if phone:
-            self._running = True
-            self.start_button.configure(state="disabled")
-            self.load_button.configure(state="disabled")
             self._countdown(5)
             return
-        self._running = True
-        self._stop.clear()
-        self.start_button.configure(state="disabled")
-        self.apply_button.configure(state="disabled")
-        for iid in self.table.get_children():
-            self.table.delete(iid)
         self._run(self.camera)
 
     def _countdown(self, seconds: int) -> None:
@@ -179,10 +209,34 @@ class CalibrationWindow:
             self.table.delete(iid)
 
         def progress(text: str) -> None:
-            self.app._queue.put(lambda: self.status_var.set(f"Mierzę: {text}"))
+            self.app._queue.put(lambda: self._status(f"Mierzę: {text}"))
 
-        self.app.run_bg(lambda: calibrate.run(self.app.service, camera, progress, stop=self._stop),
+        between = None if self.one_frame.get() else self._between
+        self.app.run_bg(lambda: calibrate.run(self.app.service, camera, progress, stop=self._stop,
+                                              between=between),
                         self._done, self._failed)
+
+    def _status(self, text: str) -> None:
+        if self.status_var is not None and self.win.winfo_exists():
+            self.status_var.set(text)
+
+    def _between(self) -> bool:
+        """(the run's thread) The keyboard is done: wait for the camera to be turned."""
+        self._next.clear()
+
+        def ask() -> None:
+            if self.win.winfo_exists():
+                self.next_button.configure(state="normal")
+                self._status("Klawiatura zmierzona. Skieruj kamerę na pokój (ścianę, sufit) "
+                             "i kliknij „Dalej”.")
+
+        self.app._queue.put(ask)
+        while not self._next.wait(0.2):
+            if self._stop.is_set():
+                return False
+        self.app._queue.put(lambda: self.win.winfo_exists()
+                            and self.next_button.configure(state="disabled"))
+        return True
 
     def load_video(self) -> None:
         if self.result is None or not self.result.commands:
@@ -195,22 +249,26 @@ class CalibrationWindow:
         self.status_var.set("Analizuję film…")
         self.load_button.configure(state="disabled")
         result = self.result
-        self.app.run_bg(lambda: calibrate.analyze_video(calibrate.read_video(path), result),
-                        self._done, self._failed)
+        self._stop.clear()
+        self._set_running(True)
+        stop = self._stop
+        # (a wrong or long file: read only the measurement's time, plus slack)
+        limit = (result.commands[-1].at - result.commands[0].at) + 10 * 60
+        self.app.run_bg(lambda: calibrate.analyze_video(
+            calibrate.read_video(path, max_seconds=limit, stop=stop), result), self._done, self._failed)
 
     def _failed(self, err: Exception) -> None:
-        self._running = False
         if self.win.winfo_exists():
-            self.start_button.configure(state="normal")
+            self._set_running(False)
             if self.result is not None and self.result.commands:
                 self.load_button.configure(state="normal")  # e.g. try another video
             self.status_var.set(f"Pomiar nie powiódł się: {err}")
 
     def _done(self, result: calibrate.Result) -> None:
-        self._running = False
         if not self.win.winfo_exists():
             return
-        self.start_button.configure(state="normal")
+        self._set_running(False)
+        self.next_button.configure(state="disabled")
         self.result = result
         if result.message:
             self.status_var.set(result.message)
@@ -229,6 +287,9 @@ class CalibrationWindow:
         for light in result.lights:
             if light.relative_ms is None:
                 values = (light.name, "nie widać", "–", "–")
+            elif light.uncertain:
+                values = (light.name, f"{light.response_ms:.0f} ms", f"{light.relative_ms:+.0f} ms",
+                          "niepewne – zmierz ponownie")
             else:
                 usable += 1
                 values = (light.name, f"{light.response_ms:.0f} ms", f"{light.relative_ms:+.0f} ms",
@@ -262,9 +323,11 @@ class CalibrationWindow:
 
     def close(self) -> None:
         self._stop.set()
-        if self.camera is not None:
-            self.camera.close()
-            self.camera = None
+        self._release_camera()
+        if getattr(self.app, "_calibration", None) is self:
+            self.app._calibration = None
+        if not self.win.winfo_exists():
+            return
         self.win.destroy()
         # Free the window's Tk variables here, on the window's thread: collected
         # later by another thread (a light's worker), Tk makes that thread wait
@@ -280,4 +343,10 @@ def open_window(app) -> CalibrationWindow | None:
     if not app.config.settings.sync_enabled or not app.service.running:
         messagebox.showinfo("TuyaChroma", "Włącz sterowanie, żeby skalibrować światła.")
         return None
-    return CalibrationWindow(app)
+    current = getattr(app, "_calibration", None)
+    if current is not None and current.win.winfo_exists():
+        current.win.lift()  # one calibration window (and camera) at a time
+        current.win.focus_set()
+        return current
+    app._calibration = CalibrationWindow(app)
+    return app._calibration
