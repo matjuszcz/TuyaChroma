@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Callable
+import json
 import logging
+import os
+from pathlib import Path
 import select
 import threading
 import time
@@ -78,11 +81,10 @@ SLOW_MAX = 1.0        # slowest sending rate (s) for a bulb that can't keep up
 SLOW_RECOVER = 30.0   # after this long without problems, try sending faster again
 
 # Bulbs that dropped off Wi-Fi while getting colors (cheap ones reboot when
-# flooded): they keep the slower rate until the program is restarted.
+# flooded): they keep the slower rate (remembered, see load_learned).
 _learned_slow: dict[str, float] = {}
 
-# Lights that hung (error 914) while getting music data: colour mode for them
-# until the program restarts.
+# Lights that hung (error 914) while getting music data: colour mode for them.
 _music_hangs: set[str] = set()
 
 
@@ -113,6 +115,7 @@ def _record_drop_age(dev_id: str, name: str, age: float) -> None:
         _learned_slow.pop(dev_id, None)
         _LOGGER.info("%s: drops off ~%.0f s after connecting - renewing the connection every "
                      "%.0f s from now on", name, min(close), _max_age[dev_id])
+    _remember(dev_id)
 
 
 # Lights that kept dropping off even at the slowest rate: the rate is not the
@@ -130,8 +133,106 @@ def learned_max_age(dev_id: str) -> float:
 
 
 def learned_slow_interval(dev_id: str) -> float:
-    """> 0 if the bulb dropped off Wi-Fi while getting colors in this session."""
+    """> 0 if the bulb dropped off Wi-Fi while getting colors (remembered)."""
     return _learned_slow.get(dev_id, 0.0)
+
+
+# What the lights taught is kept between runs (learned.json next to the
+# settings): otherwise each start began from scratch and e.g. the Light Bar had
+# to drop off twice again before its connection was renewed in time. A light
+# that shows nothing new for LEARNED_KEEP_DAYS is learned again from scratch
+# (e.g. after a new power supply fixed it).
+LEARNED_KEEP_DAYS = 14
+_learned_path: Path | None = None
+_learned_at: dict[str, float] = {}  # light id -> when it last taught something (time.time)
+_learned_lock = threading.Lock()
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value == value
+
+
+def load_learned(path: Path) -> None:
+    """Read what was learned in earlier runs; from now on changes are saved there."""
+    global _learned_path
+    _learned_path = path
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError) as err:
+        _LOGGER.warning("Ignoring %s: %s", path, err)
+        return
+    if not isinstance(data, dict):
+        return
+    oldest = time.time() - LEARNED_KEEP_DAYS * 86400
+    for dev_id, rec in data.items():
+        if not isinstance(rec, dict) or not _number(rec.get("at")) or rec["at"] < oldest:
+            continue  # forgotten: nothing new about this light for too long
+        _learned_at[dev_id] = float(rec["at"])
+        if _number(rec.get("slow")) and 0 < rec["slow"] <= SLOW_MAX:
+            _learned_slow[dev_id] = float(rec["slow"])
+        if _number(rec.get("max_age")) and rec["max_age"] >= MIN_AGE - RENEW_EARLY:
+            _max_age[dev_id] = float(rec["max_age"])
+        ages = rec.get("drop_ages")
+        if isinstance(ages, list):
+            _drop_ages[dev_id] = [float(a) for a in ages[-3:] if _number(a)]
+        if rec.get("music_hangs") is True:
+            _music_hangs.add(dev_id)
+        if rec.get("rate_innocent") is True:
+            _rate_innocent.add(dev_id)
+    if _learned_at:
+        _LOGGER.info("Remembered about the lights: %s", {
+            i: {k: v for k, v in _learned_record(i).items() if k != "at"} for i in _learned_at})
+
+
+def _learned_record(dev_id: str) -> dict[str, Any]:
+    rec: dict[str, Any] = {"at": _learned_at.get(dev_id, time.time())}
+    if dev_id in _learned_slow:
+        rec["slow"] = _learned_slow[dev_id]
+    if dev_id in _max_age:
+        rec["max_age"] = _max_age[dev_id]
+    if _drop_ages.get(dev_id):
+        rec["drop_ages"] = list(_drop_ages[dev_id])
+    if dev_id in _music_hangs:
+        rec["music_hangs"] = True
+    if dev_id in _rate_innocent:
+        rec["rate_innocent"] = True
+    return rec
+
+
+def _remember(dev_id: str) -> None:
+    """A light taught something: keep it for the next runs."""
+    _learned_at[dev_id] = time.time()
+    _save_learned()
+
+
+def _save_learned() -> None:
+    path = _learned_path
+    if path is None:
+        return
+    with _learned_lock:
+        ids = set(_learned_slow) | set(_max_age) | set(_drop_ages) | _music_hangs | _rate_innocent
+        data = {i: _learned_record(i) for i in sorted(ids)}
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError as err:
+            _LOGGER.debug("Cannot save %s: %s", path, err)
+
+
+def forget_learned(dev_id: str) -> None:
+    """Start learning about this light from scratch (e.g. it got a new power supply)."""
+    _learned_slow.pop(dev_id, None)
+    _max_age.pop(dev_id, None)
+    _drop_ages.pop(dev_id, None)
+    _music_hangs.discard(dev_id)
+    _rate_innocent.discard(dev_id)
+    _learned_at.pop(dev_id, None)
+    _save_learned()
+    _LOGGER.info("Forgot what was learned about light %s", dev_id)
 RETRY_MAX = 15.0  # seconds between connection attempts to an unreachable bulb
 
 
@@ -355,6 +456,7 @@ class BulbWorker(threading.Thread):
                 except Exception as err:  # noqa: BLE001
                     if self.use_music and ("914" in str(err) or "device key" in str(err)):
                         _music_hangs.add(self.cfg.id)
+                        _remember(self.cfg.id)
                         _LOGGER.warning("%s: stopped answering properly in music mode (error 914) "
                                         "- using colour mode from now on; if it keeps failing, "
                                         "switch it off and on", self.cfg.name)
@@ -756,6 +858,7 @@ class BulbWorker(threading.Thread):
         if dropped_off and _learned_slow.get(dev_id, 0.0) >= SLOW_MAX:
             _rate_innocent.add(dev_id)
             _learned_slow.pop(dev_id, None)
+            _remember(dev_id)
             self.slow_interval = 0.0
             _LOGGER.warning("%s: keeps dropping off the network even at 1 color per second - the "
                             "rate is not the cause (check its power supply and Wi-Fi); back to "
@@ -768,9 +871,10 @@ class BulbWorker(threading.Thread):
         elif dropped_off:
             # It vanished from the network (probably rebooted): stay slower for good.
             _learned_slow[self.cfg.id] = self.slow_interval
+            _remember(self.cfg.id)
             _LOGGER.info("%s: dropped off the network while syncing - sending at most every "
-                         "%.2f s until the program restarts (set 'Szybkość zmian' to make it "
-                         "permanent)", self.cfg.name, self.slow_interval)
+                         "%.2f s from now on (remembered for %d days without new drops)",
+                         self.cfg.name, self.slow_interval, LEARNED_KEEP_DAYS)
         else:
             _LOGGER.info("%s: sending at most every %.2f s", self.cfg.name, self.slow_interval)
 

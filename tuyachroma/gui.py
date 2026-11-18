@@ -397,6 +397,11 @@ class App:
                              anchor="center" if col in ("on", "version") else "w")
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Button-1>", self._on_tree_click)
+        self.tree.bind("<Button-3>", self._tree_menu)  # right click
+        self._light_menu = tk.Menu(self.root, tearoff=0)
+        self._light_menu.add_command(label="Zapomnij, czego program nauczył się o tym świetle",
+                                     command=lambda: self._forget_light(self._menu_dev_id))
+        self._menu_dev_id = ""
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._on_tree_select())
 
         self.editor = ttk.LabelFrame(tab, text="Ustawienia światła", padding=(10, 6, 10, 8))
@@ -605,7 +610,7 @@ class App:
                 ttk.Label(lrow, text="ms").pack(side="left", padx=(2, 14))
         ttk.Label(
             lat, foreground=theme.MUTED, wraplength=self.px(780), justify="left",
-            text=("Efekty liczy program, więc wysyła światłom kolor z wyprzedzeniem równym ich opóźnieniu – "
+            text=("Efekty liczy program, więc wysyła światłom kolor z wyprzedzeniem (czas dotarcia + przejście koloru) – "
                   "wtedy świecą równo z klawiaturą. Zmierzone opóźnienie każdego światła widać w kolumnie "
                   "„Opóźnienie” w zakładce Światła, a korektę dla jednego światła ustawisz w jej ustawieniach. "
                   "Kolorów z gry nie da się wyprzedzić (gra steruje klawiaturą bezpośrednio)."),
@@ -994,6 +999,31 @@ class App:
             ("method", self.ed_method), ("latency", self.ed_latency), ("use_scene", self.ed_use_scene),
             ("speed", self.ed_speed))}
 
+    def _tree_menu(self, event) -> None:
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+        self._menu_dev_id = row
+        try:
+            self._light_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._light_menu.grab_release()
+
+    def _forget_light(self, dev_id: str, quiet: bool = False) -> None:
+        """Drop what the program learned about a light (slower rate, renewal time):
+        e.g. after a new power supply, it is learned again from scratch."""
+        from .bulbs import forget_learned  # noqa: PLC0415
+
+        dev = self.config.device(dev_id)
+        if dev is None:
+            return
+        forget_learned(dev_id)
+        for worker in list(getattr(self.service, "workers", [])):
+            if worker.cfg.id == dev_id:
+                worker.slow_interval = 0.0  # its full rate again, now
+        if not quiet:
+            self.set_busy(f"{dev.name}: program uczy się tego światła od nowa.")
+
     def save_editor(self, quiet: bool = False) -> None:
         if self._autosave_pending is not None:  # saving now: nothing left to save later
             self.root.after_cancel(self._autosave_pending)
@@ -1040,6 +1070,8 @@ class App:
             dev.use_scene = bool(shown["use_scene"]) and bool(dev.scene)
         if "speed" in changed:
             dev.min_interval = next((k for k, v in SPEED_LABELS.items() if v == shown["speed"]), 0.15)
+            # the owner's choice: start learning this light's limits again from it
+            self._forget_light(dev.id, quiet=True)
         self._editor_snapshot = shown
         if asdict(dev) == before:
             if not quiet:

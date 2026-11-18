@@ -18,3 +18,5 @@ def _isolated_runtime(monkeypatch):
     for name, empty in (("_learned_slow", dict), ("_music_hangs", set), ("_drop_ages", dict),
                         ("_max_age", dict), ("_rate_innocent", set)):
         monkeypatch.setattr(bulbs, name, empty())
+    monkeypatch.setattr(bulbs, "_learned_at", {})
+    monkeypatch.setattr(bulbs, "_learned_path", None)  # nothing written outside tmp_path

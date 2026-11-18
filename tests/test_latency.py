@@ -56,9 +56,9 @@ def test_offset_modes() -> None:
     s = AppConfig().settings
     assert s.latency_mode == "auto"
     off = engine.SyncService.latency_offset_ms
-    assert off(_worker(120), s) == 120                 # auto: measured
+    assert off(_worker(120), s) == 60                  # auto: measured there and back: half
     assert off(_worker(None), s) == 0                  # auto, not measured yet
-    assert off(_worker(120, adjust=200), s) == 320     # + per-bulb correction
+    assert off(_worker(120, adjust=200), s) == 260     # + per-bulb correction
     s.latency_mode, s.latency_ms = "manual", 400
     assert off(_worker(120), s) == 400
     s.latency_mode = "off"
@@ -285,9 +285,9 @@ def test_offset_includes_the_lights_fade() -> None:
     def light(fade):
         return SimpleNamespace(latency_ms=60, fade_ms=fade, cfg=SimpleNamespace(latency_adjust_ms=0))
 
-    assert off(light(bulbs.COLOUR_FADE_MS), s) == 60 + bulbs.COLOUR_FADE_MS
-    assert off(light(bulbs.MUSIC_FADE_MS), s) == 60 + bulbs.MUSIC_FADE_MS
-    assert off(light(0.0), s) == 60
+    assert off(light(bulbs.COLOUR_FADE_MS), s) == 30 + bulbs.COLOUR_FADE_MS
+    assert off(light(bulbs.MUSIC_FADE_MS), s) == 30 + bulbs.MUSIC_FADE_MS
+    assert off(light(0.0), s) == 30
     s.latency_mode = "manual"
     assert off(light(bulbs.COLOUR_FADE_MS), s) == s.latency_ms  # manual means exactly what was set
 

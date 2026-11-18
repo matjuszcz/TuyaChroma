@@ -639,7 +639,10 @@ class SyncService:
     def latency_offset_ms(worker, settings) -> float:
         """How far ahead (ms) an effect color is sent to this bulb."""
         if settings.latency_mode == "auto":
-            base = getattr(worker, "latency_ms", None) or 0.0
+            # latency_ms is the time to the light's answer: there and back. The
+            # light shows the color when it gets it - half of that (in 1.13 the
+            # answer is the light's quick ack, so this is the network delay).
+            base = (getattr(worker, "latency_ms", None) or 0.0) / 2
             base += getattr(worker, "fade_ms", 0.0)  # the light's fade ends on time
         elif settings.latency_mode == "manual":
             base = float(settings.latency_ms)

@@ -193,6 +193,9 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("Razer device database: %s", err)
     config = load()
+    from .bulbs import load_learned  # noqa: PLC0415
+
+    load_learned(config_dir() / "learned.json")  # what the lights taught in earlier runs
     # "Pause" is temporary: every start (e.g. turning the PC on) takes the bulbs over again.
     config.settings.sync_enabled = True
     service = SyncService()

@@ -142,3 +142,37 @@ def test_renewing_keeps_the_lights_own_effect_playing(monkeypatch) -> None:
     scenes = [v for k, v in bulb.sent if k == "multi" and v.get("21") == "scene"]
     assert len(connects) >= 2  # it did renew
     assert len(scenes) == 1
+
+
+def test_learned_behaviour_is_remembered_between_runs(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "learned.json"
+    bulbs.load_learned(path)
+    for age in (183.0, 185.0):  # dropped off twice after the same time
+        bulbs._record_drop_age("lb", "Light Bar", age)
+    bulbs._learned_slow["gu"] = 0.6
+    bulbs._remember("gu")
+    bulbs._music_hangs.add("b2")
+    bulbs._remember("b2")
+    # the next run
+    for name in ("_learned_slow", "_max_age", "_drop_ages", "_learned_at"):
+        monkeypatch.setattr(bulbs, name, {})
+    monkeypatch.setattr(bulbs, "_music_hangs", set())
+    bulbs.load_learned(path)
+    assert bulbs.learned_max_age("lb") == 183.0 - bulbs.RENEW_EARLY
+    assert bulbs.learned_slow_interval("gu") == 0.6 and "b2" in bulbs._music_hangs
+    bulbs.forget_learned("lb")
+    monkeypatch.setattr(bulbs, "_max_age", {})
+    bulbs.load_learned(path)
+    assert bulbs.learned_max_age("lb") == 0.0  # forgotten for good
+
+
+def test_old_lessons_are_forgotten(tmp_path) -> None:
+    import json
+
+    path = tmp_path / "learned.json"
+    old = time.time() - (bulbs.LEARNED_KEEP_DAYS + 1) * 86400
+    path.write_text(json.dumps({"x": {"at": old, "slow": 1.0}, "y": {"at": time.time(), "slow": 0.6},
+                                "z": "junk", "w": {"at": "now", "slow": 1.0}}))
+    bulbs.load_learned(path)
+    assert bulbs.learned_slow_interval("x") == 0.0 and bulbs.learned_slow_interval("y") == 0.6
+    assert bulbs.learned_slow_interval("w") == 0.0

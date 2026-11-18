@@ -29,7 +29,7 @@ while it runs.
 
 ## Commands
 - Tests (Linux needs xvfb for Tk): `xvfb-run -a python -m pytest -q`. Baseline:
-  322 passed, 11 skipped. Run it twice after changes (timing tests).
+  324 passed, 11 skipped. Run it twice after changes (timing tests).
 - Lint: `python -m pyflakes tuyachroma tests`
 - GUI screenshot: build a Tk app with test data under xvfb (see tests/test_app.py
   for how to construct `App`).
@@ -56,8 +56,10 @@ Other rules:
   - `heal()` watchdog every 30 s.
   - Status line: `_set_status(text, level)`; `status_level()` feeds the window's dot.
   - `bulb_colors()`: what each light shows *now*, for the live strip.
-  - Precise sync: a worker's color is computed at send time + latency + fade + half
-    the hold interval.
+  - Precise sync: a worker's color is computed at send time + one-way delay
+    (latency_ms / 2: latency_ms is the round trip to the light's ack) + fade + half
+    the hold interval. Unverified on hardware: check against a video showing the
+    keyboard and the GU10s together.
   - `link_slot`/`link_color`: Chroma Link splits one LED per light; mouse, headset
     and similar devices split left to right.
   - `ambient_color`: screen regions.
@@ -85,7 +87,10 @@ Other rules:
     full (switch + mode) send is confirmed.
   - tests/fake_tuya.py: a fake v3.3 light on localhost for real-protocol tests.
   - Learned per-light state: slow rate, drop age (renew the connection before the
-    bulb resets), `rate_not_the_cause`, `_music_hangs`.
+    bulb resets), `rate_not_the_cause`, `_music_hangs`. Persisted in
+    `%APPDATA%/TuyaChroma/learned.json` (`load_learned` at startup in main.py,
+    `_remember` on every change), forgotten after LEARNED_KEEP_DAYS (14) without
+    news, or via the lights table's right-click menu / a manual speed change.
   - `update_config` applies changes live, without reconnecting.
 - `player.py`: Chroma SDK output. `yielded` means the devices were handed to a game.
 - `razer.py`: reads Chroma frames. Control messages (Init/Resume/Active continue;
