@@ -29,7 +29,7 @@ while it runs.
 
 ## Commands
 - Tests (Linux needs xvfb for Tk): `xvfb-run -a python -m pytest -q`. Baseline:
-  329 passed, 11 skipped. Run it twice after changes (timing tests).
+  332 passed, 11 skipped. Run it twice after changes (timing tests).
 - Lint: `python -m pyflakes tuyachroma tests`
 - GUI screenshot: build a Tk app with test data under xvfb (see tests/test_app.py
   for how to construct `App`).
@@ -110,6 +110,9 @@ Other rules:
   minus keyboard cancels the camera's own delay; the result sets each light's
   `latency_adjust_ms` so its fade's middle meets the keyboard's change. The CI
   self-test imports cv2 in the built exe.
+  Phone mode: `run(service, None)` only records `result.commands`; the owner films
+  it, `read_video` + `analyze_video` find the phone clock's offset (the command
+  train against the picture's change energy) and measure each step the same way.
 - `config.py`: Device and Settings dataclasses. `config_rev` migrations. Default
   method "auto"; `effect_sync` "precise".
 - `gui.py`: tkinter app.
@@ -132,6 +135,9 @@ Other rules:
 - A maximized window on Windows reports `root.state() == "zoomed"`. Use
   `_window_shown()`, not `== "normal"`.
 - Don't do screen grabs or network I/O on the Tk thread.
+- Tk objects (StringVar etc.) collected by a non-Tk thread make that thread wait
+  ~1 s ("main thread is not in main loop"): a light's worker stalls. Free them on
+  the Tk thread (calibrate_gui.close, conftest's gc.collect after each test).
 - Tuya lights silently ignore too-fast commands. Respect `min_interval` and product
   floors.
 

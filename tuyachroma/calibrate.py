@@ -15,6 +15,7 @@ shine into; the lights themselves needn't be in the picture.
 
 from __future__ import annotations
 
+import bisect
 from collections import deque
 from dataclasses import dataclass, field
 import logging
@@ -181,19 +182,33 @@ class LightResult:
 
 
 @dataclass
+class Command:
+    who: str          # "keyboard" or a light id
+    at: float         # monotonic time it was sent
+    bright: bool      # dark -> bright (measured) or back
+
+
+@dataclass
 class Result:
     keyboard_ms: float | None = None
     lights: list[LightResult] = field(default_factory=list)
     message: str = ""
+    commands: list[Command] = field(default_factory=list)  # for a phone video
+    step: float = STEP
 
 
 def run(service, camera, progress: Callable[[str], None] = lambda _t: None,
         trials: int = TRIALS, step: float = STEP, stop: threading.Event | None = None) -> Result:
-    """Measure the keyboard and every light; the sync is paused meanwhile."""
+    """Step the keyboard and every light; the sync is paused meanwhile.
+
+    With a camera the responses are measured right away. Without one
+    (``camera=None``: a phone films it) only the command times are kept, for
+    analyze_video() to match the recording against.
+    """
     stop = stop or threading.Event()
     player = service.player
     workers = list(service.workers)
-    result = Result()
+    result = Result(step=step)
     if player is None or not getattr(player, "output_ready", False):
         result.message = "Urządzenia Razer nie są teraz sterowane przez program – kalibracja potrzebuje klawiatury."
         return result
@@ -212,42 +227,51 @@ def run(service, camera, progress: Callable[[str], None] = lambda _t: None,
             return _wait_for(lambda: _sent_at(player.override_sent, color), 1.0, stop)
 
         progress("Klawiatura…")
-        result.keyboard_ms = _measure(camera, keyboard_step, trials, step, stop)
-        if result.keyboard_ms is None:
+        result.keyboard_ms = _measure(camera, keyboard_step, "keyboard", result, trials, step, stop)
+        if camera is not None and result.keyboard_ms is None:
             result.message = ("Kamera nie widzi zmiany na klawiaturze – ustaw ją tak, żeby widziała "
                               "klawiaturę (albo jej poświatę) i spróbuj ponownie.")
             return result
+        settings = service._settings
         for n, w in enumerate(workers, 1):
             if stop.is_set():
                 break
             progress(f"{w.cfg.name} ({n}/{len(workers)})…")
             light = LightResult(w.cfg.id, w.cfg.name)
+            light.current_ms = (service.latency_offset_ms(w, settings)
+                                - getattr(w.cfg, "latency_adjust_ms", 0))
 
             def light_step(color, w=w) -> float | None:
                 w.set_color(color)
                 return _wait_for(lambda: _sent_at(getattr(w, "last_sent", None), color), 1.5, stop)
 
-            light.response_ms = _measure(camera, light_step, trials, step, stop)
-            if light.response_ms is not None:
-                light.relative_ms = light.response_ms - result.keyboard_ms
-                settings = service._settings
-                light.current_ms = (service.latency_offset_ms(w, settings)
-                                    - getattr(w.cfg, "latency_adjust_ms", 0))
-                # changes in the middle of its fade with the keyboard's change
-                light.adjust_ms = max(-1000, min(1000, round(light.relative_ms - light.current_ms)))
+            light.response_ms = _measure(camera, light_step, w.cfg.id, result, trials, step, stop)
             result.lights.append(light)
             w.set_color(DARK)
+        _finish(result)
         progress("Gotowe.")
-        _LOGGER.info("Camera calibration: keyboard %.0f ms; %s", result.keyboard_ms,
-                     "; ".join(f"{r.name}: {r.response_ms if r.response_ms is None else round(r.response_ms)}"
-                               f" ms (correction {r.adjust_ms})" for r in result.lights))
         return result
     finally:
         player.override = None
         service.calibrating = False
 
 
-def _measure(camera, step_to, trials: int, step: float, stop: threading.Event) -> float | None:
+def _finish(result: Result) -> None:
+    """Corrections from the responses: each light's fade meets the keyboard's change."""
+    for light in result.lights:
+        if light.response_ms is None or result.keyboard_ms is None:
+            light.relative_ms = light.adjust_ms = None
+            continue
+        light.relative_ms = light.response_ms - result.keyboard_ms
+        light.adjust_ms = max(-1000, min(1000, round(light.relative_ms - light.current_ms)))
+    if result.keyboard_ms is not None and result.lights:
+        _LOGGER.info("Camera calibration: keyboard %.0f ms; %s", result.keyboard_ms, "; ".join(
+            f"{r.name}: {'-' if r.response_ms is None else round(r.response_ms)} ms "
+            f"(correction {r.adjust_ms})" for r in result.lights))
+
+
+def _measure(camera, step_to, who: str, result: Result, trials: int, step: float,
+             stop: threading.Event) -> float | None:
     """Median response (ms) over a few dark -> bright steps; None if not seen."""
     times = []
     for _ in range(trials):
@@ -256,15 +280,112 @@ def _measure(camera, step_to, trials: int, step: float, stop: threading.Event) -
         command_at = step_to(BRIGHT)
         if command_at is None:
             continue
+        result.commands.append(Command(who, command_at, True))
         _wait(step, stop)
-        seen = response_time(camera.samples(command_at - 0.6), command_at)
-        if seen is not None:
-            times.append(seen * 1000)
-        step_to(DARK)
+        if camera is not None:
+            seen = response_time(camera.samples(command_at - 0.6), command_at)
+            if seen is not None:
+                times.append(seen * 1000)
+        back = step_to(DARK)
+        if back is not None:
+            result.commands.append(Command(who, back, False))
         _wait(step, stop)
-    if len(times) < max(1, trials - 1):
+    if camera is None or len(times) < max(1, trials - 1):
         return None
     return statistics.median(times)
+
+
+# ---------------------------------------------------------------- a phone video
+
+
+def read_video(path: str) -> list[Sample]:
+    """The frames of a recording, as (seconds from its start, grid)."""
+    import cv2  # noqa: PLC0415
+
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        raise OSError("nie udało się otworzyć filmu")
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    samples: list[Sample] = []
+    n = 0
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+            t = ms / 1000 if ms and ms > 0 else n / fps
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            grid = cv2.resize(gray, (GRID_W, GRID_H), interpolation=cv2.INTER_AREA)
+            samples.append((t, [float(v) for v in grid.flatten()]))
+            n += 1
+    finally:
+        cap.release()
+    if len(samples) < 30:
+        raise OSError("film jest za krótki albo w nieobsługiwanym formacie (w iPhonie: "
+                      "Ustawienia → Aparat → Formaty → Najbardziej zgodny)")
+    return samples
+
+
+def analyze_video(samples: list[Sample], result: Result) -> Result:
+    """Match a recording of the steps (filmed with a phone) to their command times.
+
+    The phone's clock is unknown: the offset that lines the commands up with the
+    moments the picture changes is found first, then each step is measured as
+    with a webcam. A constant offset cancels between the keyboard and the lights.
+    """
+    if not result.commands:
+        result.message = "Najpierw wykonaj pomiar, nagrywając go telefonem."
+        return result
+    energy = [(t, sum(abs(a - b) for a, b in zip(g, prev)))
+              for (t, g), (_pt, prev) in zip(samples[1:], samples)]
+    times = [t for t, _e in energy]
+    values = [e for _t, e in energy]
+    first = result.commands[0].at
+    rel = [c.at - first for c in result.commands]
+    span = rel[-1] + result.step
+    video_len = times[-1] - times[0]
+    if video_len < span - 1.0:
+        result.message = ("Film jest krótszy niż pomiar – nagrywaj od chwili przed kliknięciem "
+                          "„Rozpocznij” do napisu „Gotowe”.")
+        return result
+    # the offset: where in the video the first command was given
+    best, best_score = None, -1.0
+    step = (times[-1] - times[0]) / max(1, len(times) - 1)
+    offset = times[0]
+    while offset + span <= times[-1] + 1.0:
+        score = 0.0
+        for r in rel:
+            i, j = bisect.bisect_left(times, offset + r), bisect.bisect_right(times, offset + r + 0.8)
+            score += max(values[i:j], default=0.0)
+        if score > best_score:
+            best, best_score = offset, score
+        offset += step
+    assert best is not None
+    shifted = [(t - best + first, g) for t, g in samples]
+    by_who: dict[str, list[float]] = {}
+    for c in result.commands:
+        if not c.bright:
+            continue
+        window = [s for s in shifted if c.at - 0.6 <= s[0] <= c.at + result.step]
+        seen = response_time(window, c.at)
+        if seen is not None:
+            by_who.setdefault(c.who, []).append(seen * 1000)
+
+    def median(who: str) -> float | None:
+        values = by_who.get(who, [])
+        return statistics.median(values) if len(values) >= 2 else None
+
+    result.keyboard_ms = median("keyboard")
+    if result.keyboard_ms is None:
+        result.message = ("Na filmie nie widać zmiany klawiatury – nagraj tak, żeby w kadrze była "
+                          "klawiatura (albo jej poświata) i pokój.")
+        return result
+    for light in result.lights:
+        light.response_ms = median(light.dev_id)
+    result.message = ""
+    _finish(result)
+    return result
 
 
 def _sent_at(sent, color) -> float | None:

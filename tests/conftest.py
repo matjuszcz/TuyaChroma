@@ -20,3 +20,9 @@ def _isolated_runtime(monkeypatch):
         monkeypatch.setattr(bulbs, name, empty())
     monkeypatch.setattr(bulbs, "_learned_at", {})
     monkeypatch.setattr(bulbs, "_learned_path", None)  # nothing written outside tmp_path
+    yield
+    # Tk objects left by a GUI test are freed now, on the main thread: collected
+    # later by a worker thread, Tk makes it wait ~1 s (timing tests then fail).
+    import gc  # noqa: PLC0415
+
+    gc.collect()

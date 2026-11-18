@@ -166,11 +166,13 @@ Po dodaniu, usunięciu lub ponownym sparowaniu żarówki w aplikacji Smart Life 
 
 ### Kalibracja kamerą
 
-*Światła → Kalibracja kamerą…* mierzy kamerą internetową (albo telefonem używanym jako kamera), kiedy każde światło **naprawdę** zmienia kolor w porównaniu z klawiaturą, i samo ustawia każdemu światłu *Korektę (ms)*. Program sam z siebie wie tylko, kiedy światło potwierdziło polecenie – nie widzi, kiedy faktycznie zmieniło barwę ani jak długo trwa jego płynne przejście.
+*Światła → Kalibracja kamerą…* mierzy kamerą internetową albo **telefonem** (nagrywając film), kiedy każde światło **naprawdę** zmienia kolor w porównaniu z klawiaturą, i samo ustawia każdemu światłu *Korektę (ms)*. Program sam z siebie wie tylko, kiedy światło potwierdziło polecenie – nie widzi, kiedy faktycznie zmieniło barwę ani jak długo trwa jego płynne przejście.
 
 1. Ustaw kamerę tak, żeby widziała klawiaturę (albo jej poświatę) i pokój, w którym świecą światła. Same światła nie muszą być w kadrze. Najlepiej po zmroku, bez ruchu przed kamerą.
 2. Kliknij *Rozpocznij pomiar*. Program na chwilę wstrzymuje efekt i po kolei kilka razy rozjaśnia klawiaturę i każde światło (ok. 10 s na światło).
 3. W tabeli zobaczysz, o ile każde światło zmienia się później niż klawiatura i jaką dostanie korektę. *Zastosuj korekty* zapisuje je.
+
+**Telefonem:** wybierz *Telefon (nagranie filmu)*, postaw telefon tak, żeby widział klawiaturę i pokój, włącz nagrywanie i kliknij *Rozpocznij pomiar* (start za 5 s). Gdy pojawi się „Gotowe”, zatrzymaj nagrywanie, przenieś film na komputer (kabel, iCloud, e-mail…) i kliknij *Wczytaj film…*. Program sam dopasuje film do pomiaru – zegar telefonu nie musi się zgadzać z komputerem.
 
 Opóźnienie samej kamery nie ma znaczenia: klawiatura i światła są mierzone tą samą kamerą, więc się znosi. Kalibrację warto powtórzyć po zmianie *Szybkości zmian*, zasilacza albo routera.
 

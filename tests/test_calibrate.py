@@ -197,3 +197,93 @@ def test_calibration_window_measures_and_applies(tmp_path, monkeypatch) -> None:
         win.close()
     finally:
         app.root.destroy()
+
+
+def test_phone_video_is_matched_to_the_commands() -> None:
+    """Steps filmed with a phone: its clock is unknown (another start, another delay)."""
+    world = World(0.04, {"gu": (0.18, 0.25), "strip": (0.42, 0.25)})
+    lights = [FakeLight(world, "gu", latency_ms=120), FakeLight(world, "strip", latency_ms=300)]
+    service = _service(world, lights)
+    started = time.monotonic() - 3.0  # the phone started recording 3 s earlier
+    result = calibrate.run(service, None, trials=2, step=1.2)
+    assert result.keyboard_ms is None and len(result.commands) == 3 * 2 * 2
+    # the recording: frames at 30 fps in the phone's own time, 0.25 s camera delay
+    world.camera_lag = 0.25
+    end = time.monotonic() + 1.0
+    video, t = [], started
+    while t <= end:
+        video.append((t - started + 7.0, world.grid(t)))  # the phone's clock: any start
+        t += 1 / FPS
+    calibrate.analyze_video(video, result)
+    assert not result.message, result.message
+    gu, strip = result.lights
+    assert abs(gu.relative_ms - 265) < 45 and abs(strip.relative_ms - 505) < 45
+    assert gu.adjust_ms is not None and abs(gu.current_ms + gu.adjust_ms - gu.relative_ms) <= 1
+
+
+def test_video_file_is_read(tmp_path) -> None:
+    import pytest
+
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+
+    path = str(tmp_path / "clip.avi")
+    out = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"MJPG"), 30, (64, 48))
+    for i in range(60):
+        out.write(np.full((48, 64, 3), 20 if i < 30 else 200, dtype=np.uint8))
+    out.release()
+    samples = calibrate.read_video(path)
+    assert len(samples) == 60 and abs(samples[-1][0] - 59 / 30) < 0.05
+    assert samples[0][1][0] < 50 < samples[-1][1][0]
+
+
+def test_calibration_window_phone_flow(tmp_path, monkeypatch) -> None:
+    import pytest
+
+    from test_app import FakeReader, Recorder, _tk_available, dev
+
+    if not _tk_available():
+        pytest.skip("no display / tkinter")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    from tuyachroma import calibrate_gui, gui
+
+    recorded = calibrate.Result(commands=[calibrate.Command("keyboard", 1.0, True)],
+                                lights=[calibrate.LightResult("a", "RGB Biuro 1", current_ms=310.0)])
+
+    def analyzed(samples, result):
+        result.keyboard_ms = 150.0
+        result.lights[0].response_ms = 420.0
+        calibrate._finish(result)
+        return result
+
+    monkeypatch.setattr(calibrate, "available", lambda: True)
+    monkeypatch.setattr(calibrate, "find_cameras", lambda: [])
+    monkeypatch.setattr(calibrate, "run", lambda service, camera, progress, stop=None: recorded)
+    monkeypatch.setattr(calibrate, "read_video", lambda path: [])
+    monkeypatch.setattr(calibrate, "analyze_video", analyzed)
+    monkeypatch.setattr(calibrate_gui.filedialog, "askopenfilename", lambda **k: "clip.mov")
+    config = AppConfig(devices=[dev("a", enabled=True)])
+    service = engine.SyncService(reader_factory=FakeReader, worker_factory=Recorder,
+                                 service_check=lambda: True)
+    app = gui.App(config, service, start_hidden=False, use_tray=False)
+    monkeypatch.setattr(type(service), "running", property(lambda self: True))
+
+    def pump(cond, t=8):
+        end = time.time() + t
+        while time.time() < end and not cond():
+            app.root.update()
+            time.sleep(0.02)
+        return cond()
+
+    try:
+        win = calibrate_gui.open_window(app)
+        assert pump(lambda: win.mode.get() == "phone")  # no webcam: the phone
+        win._countdown = lambda seconds: win._run(None)   # no 5 s wait in the test
+        win.start()
+        assert pump(lambda: str(win.load_button.cget("state")) == "normal")
+        win.load_video()
+        assert pump(lambda: bool(win.table.get_children()))
+        assert win.table.item(win.table.get_children()[0], "values")[3] == "-40 ms"
+        win.close()
+    finally:
+        app.root.destroy()

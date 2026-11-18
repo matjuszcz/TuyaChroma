@@ -118,6 +118,7 @@ def test_restore_mode_leaves_bulbs_alone_without_game(monkeypatch) -> None:
         world.game_color = (0, 255, 0)
         assert wait_for(lambda: all(colours(b) for b in bulbs.values()), 3)
         world.game_color = None
-        assert wait_for(lambda: all(b.sent[-1] == ("multi", HA_STATE) for b in bulbs.values()), 3)
+        # (GAME_HOLD 2 s, then the restore: allow for a slow runner)
+        assert wait_for(lambda: all(b.sent[-1] == ("multi", HA_STATE) for b in bulbs.values()), 6)
     finally:
         service.stop()
