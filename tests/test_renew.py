@@ -184,7 +184,7 @@ def test_a_light_switched_off_teaches_nothing(tmp_path, monkeypatch) -> None:
     w = BulbWorker(BulbConfig(name="RGB Biuro 1", id="gu", ip="1", local_key="k", min_interval=0.1),
                    device_factory=lambda _cfg: FakeBulb())
     for away in (400.0, 410.0):  # two power cuts after a similar connection age
-        w._pending_drop = (time.monotonic() - 600.0, away)
+        w._pending_drop = w._drop_snapshot(time.monotonic() - 600.0, away)
         w._slow_down(dropped_off=True)
         w._judge_drop()  # back after 10 minutes
     assert bulbs.learned_max_age("gu") == 0.0 and bulbs.learned_slow_interval("gu") == 0.0
@@ -192,7 +192,7 @@ def test_a_light_switched_off_teaches_nothing(tmp_path, monkeypatch) -> None:
     assert not (tmp_path / "learned.json").exists() or "gu" not in (tmp_path / "learned.json").read_text()
     # a real reboot (back within seconds) is learned and kept
     for age in (183.0, 185.0):
-        w._pending_drop = (time.monotonic() - 20.0, age)
+        w._pending_drop = w._drop_snapshot(time.monotonic() - 20.0, age)
         w._judge_drop()
     assert bulbs.learned_max_age("gu") == 183.0 - bulbs.RENEW_EARLY
     assert "gu" in (tmp_path / "learned.json").read_text()
@@ -215,3 +215,31 @@ def test_damaged_learned_file_never_stops_the_program(tmp_path) -> None:
         path.write_text(text)
         bulbs.load_learned(path)  # no exception
     assert bulbs.learned_max_age("x") == 0.0
+
+
+def test_switch_off_keeps_what_an_earlier_reboot_taught(tmp_path) -> None:
+    """A lesson from earlier runs survives a light being switched off by hand."""
+    path = tmp_path / "learned.json"
+    bulbs.load_learned(path)
+    bulbs._learned_slow["gu"] = 0.6
+    bulbs._remember("gu")
+    w = BulbWorker(BulbConfig(name="RGB Biuro 1", id="gu", ip="1", local_key="k", min_interval=0.1),
+                   device_factory=lambda _cfg: FakeBulb())
+    w.slow_interval = 0.6
+    w._pending_drop = w._drop_snapshot(time.monotonic() - 600.0, 400.0)
+    w._slow_down(dropped_off=True)  # (raised to 1.0 for now)
+    w._judge_drop()  # back after 10 minutes: switched off
+    assert bulbs.learned_slow_interval("gu") == 0.6 and w.slow_interval == 0.6
+    assert '"slow": 0.6' in path.read_text()
+
+
+def test_a_quick_reboot_is_saved_even_soon_after_connecting(tmp_path) -> None:
+    path = tmp_path / "learned.json"
+    bulbs.load_learned(path)
+    w = BulbWorker(BulbConfig(name="Light Bar", id="lb", ip="1", local_key="k", min_interval=0.3),
+                   device_factory=lambda _cfg: FakeBulb())
+    w._pending_drop = w._drop_snapshot(time.monotonic() - 20.0, 30.0)  # 30 s on the connection
+    w._slow_down(dropped_off=True)
+    w._judge_drop()  # back within seconds: a reboot
+    assert bulbs.learned_slow_interval("lb") == 0.6
+    assert '"lb"' in path.read_text()

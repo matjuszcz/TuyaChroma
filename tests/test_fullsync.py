@@ -953,3 +953,29 @@ def test_status_level() -> None:
     assert service._status_text("full", "Wave")[1] == "ok"
     service._set_status("Razer niedostępny: Synapse not running", "error")
     assert service.status_level() == "error"
+
+
+def test_player_survives_an_sdk_that_fails_to_close() -> None:
+    """A Chroma SDK error while closing must not end the effect player."""
+    from tuyachroma.player import EffectPlayer
+    from tuyachroma.profiles import Profile
+    from tuyachroma.render import Renderer
+
+    class Broken:
+        def send_frames(self, frames):
+            raise OSError("service gone")
+
+        def close(self):
+            raise OSError("already closed")
+
+    player = EffectPlayer(Renderer(Profile(name="p", effect="static")), bulb_count=1,
+                          output_factory=Broken, fps=50)
+    player.SEND_RETRY = 0.01
+    player.override = (255, 255, 255)
+    player.start()
+    try:
+        time.sleep(0.3)
+        assert player.is_alive()
+        assert player.override_sent is None  # never got through: no time to measure from
+    finally:
+        player.stop(2)

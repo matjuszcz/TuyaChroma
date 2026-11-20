@@ -370,7 +370,8 @@ class BulbWorker(threading.Thread):
         self._no_ack_streak = 0
         self._no_ack_warned = False
         self.last_sent: tuple[float, RGB] | None = None
-        self._pending_drop: tuple[float, float] | None = None  # (when, connection age)
+        # (when, connection age, what was learned before it): see _drop_snapshot
+        self._pending_drop: tuple | None = None
         self._connected_at = 0.0
 
     # ------------------------------------------------------------ public API
@@ -492,8 +493,8 @@ class BulbWorker(threading.Thread):
                     if isinstance(err, BulbOffline):
                         # learned only if it comes back soon (a reboot): a light that
                         # stays away was switched off - nothing to learn from that
-                        self._pending_drop = (time.monotonic(),
-                                              time.monotonic() - self._connected_at)
+                        self._pending_drop = self._drop_snapshot(
+                            time.monotonic(), time.monotonic() - self._connected_at)
                     if self._send_count == sends_before:
                         raise  # nothing got through since connecting: normal retry with pauses
                     # It worked a moment ago: reconnect right away, not after a pause.
@@ -629,9 +630,6 @@ class BulbWorker(threading.Thread):
             self._wake.clear()
             if self._stopping.is_set():
                 return
-            with self._lock:
-                target, restore = self._target, self._restore_requested
-                self._restore_requested = False
             now = time.monotonic()
             max_age = _max_age.get(self.cfg.id, 0.0)
             if max_age and now - self._connected_at > max_age and self._capture is None:
@@ -664,6 +662,10 @@ class BulbWorker(threading.Thread):
                 continue
             if self._hold:
                 continue  # the heartbeat above keeps the connection alive
+            # (read only now: a hold or a state read above must not swallow a restore)
+            with self._lock:
+                target, restore = self._target, self._restore_requested
+                self._restore_requested = False
             if restore:
                 gap = self._interval() - (time.monotonic() - last_send)
                 if gap > 0:
@@ -885,21 +887,39 @@ class BulbWorker(threading.Thread):
 
     REBOOT_MAX = 90.0  # s: back within this after dropping off = it rebooted
 
+    def _drop_snapshot(self, when: float, age: float) -> tuple:
+        """A drop to judge once the light is back, with what was learned before
+        it (a switch-off must not wipe a lesson from an earlier reboot)."""
+        dev_id = self.cfg.id
+        return (when, age, _learned_slow.get(dev_id), dev_id in _rate_innocent, self.slow_interval)
+
     def _judge_drop(self) -> None:
         """Connected again after it dropped off: a reboot (back soon) teaches
         something worth keeping; being away long means it was switched off."""
         pending, self._pending_drop = self._pending_drop, None
         if pending is None:
             return
-        away = time.monotonic() - pending[0]
+        when, age, slow_before, innocent_before, interval_before = pending
+        dev_id = self.cfg.id
+        away = time.monotonic() - when
         if away <= self.REBOOT_MAX:
-            _record_drop_age(self.cfg.id, self.cfg.name, pending[1])  # (also saves the rest)
+            _record_drop_age(dev_id, self.cfg.name, age)
+            _remember(dev_id)  # (also the slower rate of a drop soon after connecting)
+            return
+        # switched off (by hand or at the wall): not the colors' fault - back to
+        # what was known before this drop
+        if slow_before is None:
+            _learned_slow.pop(dev_id, None)
         else:
-            # switched off (by hand or at the wall): not the colors' fault
-            _learned_slow.pop(self.cfg.id, None)
-            self.slow_interval = 0.0
-            _LOGGER.info("%s: was away %.0f s (switched off?) - nothing learned from it",
-                         self.cfg.name, away)
+            _learned_slow[dev_id] = slow_before
+        if innocent_before:
+            _rate_innocent.add(dev_id)
+        else:
+            _rate_innocent.discard(dev_id)
+        self.slow_interval = interval_before
+        _save_learned()
+        _LOGGER.info("%s: was away %.0f s (switched off?) - nothing learned from it",
+                     self.cfg.name, away)
 
     def _slow_down(self, dropped_off: bool = False) -> None:
         """The bulb stopped confirming colors: send them less often for a while."""

@@ -86,16 +86,13 @@ class EffectPlayer(threading.Thread):
                     self._frames, self._strip = frames, strip
                 if self._factory is not None and self.yielded:
                     if self._output is not None:
-                        self._output.close()
-                        self._output = None
+                        self._close_output()
                         _LOGGER.info("Razer devices handed over to the game")
                     self.output_status = "urządzenia Razer: steruje gra"
                 elif self._factory is not None:
                     if self._reconnect:
                         self._reconnect = False
-                        if self._output is not None:
-                            self._output.close()
-                            self._output = None
+                        self._close_output()
                         next_try = 0.0
                     if self._send_failed_at is not None:
                         # the SDK/service went away: don't reopen it every frame
@@ -129,15 +126,23 @@ class EffectPlayer(threading.Thread):
                                 out = {name: [override] * len(colors) for name, colors in out.items()}
                             sent_at = time.monotonic()
                             self._send(out)
-                            if override is not None and (self.override_sent is None
-                                                         or self.override_sent[1] != override):
+                            if override is not None and self._output is not None and (
+                                    self.override_sent is None or self.override_sent[1] != override):
                                 self.override_sent = (sent_at, override)
                 spent = time.monotonic() - started
                 self._stop_event.wait(max(0.0, self._period - spent))
         finally:
-            if self._output is not None:
-                self._output.close()
-                self._output = None
+            self._close_output()
+
+    def _close_output(self) -> None:
+        """Let go of the Chroma SDK; an error closing it must not end the player."""
+        output, self._output = self._output, None
+        if output is None:
+            return
+        try:
+            output.close()
+        except Exception:  # noqa: BLE001 - the SDK/service is already gone
+            _LOGGER.debug("Closing the Chroma SDK failed", exc_info=True)
 
     def _send(self, frames: dict[str, list[RGB]]) -> None:
         try:
@@ -145,7 +150,4 @@ class EffectPlayer(threading.Thread):
         except Exception as err:  # noqa: BLE001 - SDK/service went away
             _LOGGER.warning("Chroma SDK error: %s", err)
             self._send_failed_at = time.monotonic()
-            try:
-                self._output.close()
-            finally:
-                self._output = None
+            self._close_output()

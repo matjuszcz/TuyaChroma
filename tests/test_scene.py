@@ -159,3 +159,24 @@ def test_music_mode_restored_after_scene() -> None:
         assert bulb.sent[n + 1][0] == "music"
     finally:
         worker.stop(2)
+
+
+def test_release_during_hold_is_not_lost() -> None:
+    """The light is given back once the hold ends, even if released meanwhile."""
+    bulb = FakeBulb(music=False)
+    worker = BulbWorker(BulbConfig(name="strip", id="s3", ip="1", local_key="k", min_interval=0.02),
+                        device_factory=lambda _cfg: bulb)
+    worker.start()
+    assert wait_for(lambda: worker.connected)
+    try:
+        worker.set_color((0, 255, 0))
+        assert wait_for(lambda: worker.status == bulbs.STATUS_SYNC)
+        worker.hold(True)
+        worker.release()  # e.g. the game ended while the owner sets the light in the app
+        import time
+        time.sleep(0.2)
+        worker.hold(False)
+        assert wait_for(lambda: worker.status == bulbs.STATUS_READY)
+        assert bulb.sent[-1][1]["21"] == "white"
+    finally:
+        worker.stop(2)
